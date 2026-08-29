@@ -1,0 +1,10 @@
+# Formato: TIPO,Nome Piatto,Prezzo
+PRIMO,Spaghetti allo Scoglio,6
+PRIMO,Penne all'Arrabbiata,4
+SECONDO,Frittura di Pesce,8
+SECONDO,Insalata Mista,4
+DOLCE,Tiramisù,3
+CAFFE,Espresso Normale,1
+CAFFE,Espresso Macchiato,1
+CAFFE,Decaffeinato,1
+CAFFE,Caffe al Ginseng,2
