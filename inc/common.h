@@ -90,6 +90,7 @@ typedef struct {
     // Variabili per il Menu
     menu_item_t primi[MAX_PIATTI];
     menu_item_t secondi[MAX_PIATTI];
+    menu_item_t dolce;
     menu_item_t caffe[4]; // 4 tipologie richieste dal bando
     
     int num_primi;
