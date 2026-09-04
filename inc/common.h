@@ -10,6 +10,7 @@
 #include <sys/sem.h>
 #include <sys/msg.h>
 #include <sys/wait.h>
+#include <sys/time.h>
 #include <time.h>
 #include <signal.h>
 #include <string.h>
@@ -17,89 +18,94 @@
 
 #include "config_parser.h"
 
-// CHIAVI IPC
 #define SHM_KEY 0x1A2B
 #define SEM_KEY 0x3C4D
 #define MSG_KEY 0x5E6F
 
-// INDICI SEMAFORI (Totale: 7)
-#define SEM_MUTEX   0  // Mutua esclusione sulla Shared Memory
-#define SEM_TAVOLI  1  // Posti a sedere disponibili
-#define SEM_PRIMI   2  // Postazioni stazione Primi
-#define SEM_SECONDI 3  // Postazioni stazione Secondi
-#define SEM_COFFEE  4  // Postazioni stazione Caffè
-#define SEM_CASSA   5  // Postazioni Cassa
-#define SEM_SYNC    6  // Barriera di sincronizzazione iniziale
-#define NUM_SEMAPHORES 7
+// INDICI SEMAFORI (Totale: 8)
+#define SEM_MUTEX       0
+#define SEM_TAVOLI      1
+#define SEM_PRIMI       2
+#define SEM_SECONDI     3
+#define SEM_COFFEE      4
+#define SEM_CASSA       5
+#define SEM_DAY_START   6  // Barriera inizio giornata
+#define SEM_DAY_END     7  // Barriera fine giornata
 
-// TIPI MESSAGGIO PER LE CODE IPC
 #define TYPE_PRIMI    1
 #define TYPE_SECONDI  2
 #define TYPE_COFFEE   3
 #define TYPE_CASSA    4
 
-// UNION PER SEMAFORI (Necessaria per semctl su Linux/Mac)
+#define MAX_WORKERS 20
+#define MAX_PIATTI 10
+
 union semun {
     int val;
     struct semid_ds *buf;
     unsigned short *array;
 };
 
-// STRUTTURA MESSAGGIO
 typedef struct {
-    long mtype;          // PID destinatario oppure TYPE_STAZIONE
+    long mtype;
     int sender_pid;
-    int status;          // 1 = servito / ok, 0 = esaurito / fallito
+    int status;
     int importo;
     int indice_piatto;
 } msg_t;
 
-#define MAX_PIATTI 10
-
-// STRUTTURA PIATTO DEL MENU
 typedef struct {
     char name[32];
     int price;
     int porzioni_rimanenti;
 } menu_item_t;
 
-// STRUTTURA MEMORIA CONDIVISA
 typedef struct {
-    int sim_time;             
-    int users_served;         
-    int users_dropped;        
-    int users_waiting;        
-    int revenue;               
+    int sim_time;
+    int sim_running;
+    int day_ended;
+    int current_day;
 
-    // Piatti serviti: [0]=Primi, [1]=Secondi, [2]=Caffè
-    int dishes_served[3];     
-    // Piatti avanzati/buttati a fine giornata: [0]=Primi, [1]=Secondi, [2]=Caffè
-    int dishes_wasted[3];          
+    // Assegnazione giornaliera degli operatori: indice = id_operatore, valore = TYPE_STAZIONE
+    int op_assignment[MAX_WORKERS];
+    
+    // Contatori per code e operatori attivi
+    int queue_lengths[5];
+    int active_ops[5];
 
-    int portions_primi;       
-    int portions_secondi;     
-    int sim_running;               
-    int ready_count;               
-
-    // Contatori operatori attivi per stazione (1=Primi, 2=Secondi, 3=Caffè, 4=Cassa)
-    int active_ops[5];     
-    int queue_lengths[5]; // NUOVO: Lunghezza delle code per stazione
-    int total_pauses;         
-
-    // Variabili per il Menu
+    // Menu
     menu_item_t primi[MAX_PIATTI];
     menu_item_t secondi[MAX_PIATTI];
-    menu_item_t caffe[4]; 
-    menu_item_t dolce; // Dolce illimitato
+    menu_item_t contorni[MAX_PIATTI];
+    menu_item_t caffe[4];
+    menu_item_t dolce;
     
     int num_primi;
     int num_secondi;
+    int num_contorni;
     int num_caffe;
 
-    // Statistiche tempi di attesa
-    double total_wait_time;
-    double wait_time_stazioni[5]; 
+    // Statistiche Giornaliere
+    int daily_users_served;
+    int daily_users_dropped;
+    int daily_revenue;
+    int daily_pauses;
+
+    // Statistiche Totali
+    int total_users_served;
+    int total_users_dropped;
+    int total_revenue;
+    int total_pauses;
+    int total_dishes_served[4]; // 0=Primi, 1=Secondi, 2=Contorni, 3=Caffe
+    int total_dishes_wasted[4];
+
+    // Tempi di attesa (misurati in tick di sim_time)
+    int wait_time_stazioni[5];
     int wait_count_stazioni[5];
+
+    // Contatore per l'overload
+    int users_waiting;
+    
 } shared_data_t;
 
 #endif // COMMON_H
