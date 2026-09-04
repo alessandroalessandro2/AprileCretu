@@ -22,6 +22,8 @@ int main(int argc, char *argv[]) {
         
         semop(semid, &mutex_lock, 1);
         int type = shm_ptr->op_assignment[my_id];
+        // Traccia identificativa per il calcolo cumulativo (operatore distinto)
+        if(my_id < MAX_WORKERS) shm_ptr->worker_has_worked[my_id] = 1;
         semop(semid, &mutex_unlock, 1);
         
         int tempo_medio = 10; int station_sem = -1;
@@ -36,13 +38,11 @@ int main(int argc, char *argv[]) {
         semop(semid, &mutex_lock, 1);
         shm_ptr->active_ops[type]++;
         shm_ptr->daily_active_ops++; 
-        shm_ptr->total_active_ops++; 
         semop(semid, &mutex_unlock, 1);
 
         int pauses_taken = 0;
         while (1) {
             if (msgrcv(msgid, &req, msg_size, type, IPC_NOWAIT) != -1) {
-                // Calcola l'attesa VERA della coda
                 semop(semid, &mutex_lock, 1);
                 int queue_wait = shm_ptr->sim_time - req.enqueue_time;
                 if (queue_wait < 0) queue_wait = 0;
@@ -60,7 +60,6 @@ int main(int argc, char *argv[]) {
                     }
                 } else if (type == TYPE_SECONDI) {
                     int c_idx = req.indice_piatto % shm_ptr->num_contorni;
-                    // Atomicità: servo il secondo SOLO se c'è anche il contorno
                     if (shm_ptr->secondi[req.indice_piatto].porzioni_rimanenti > 0 &&
                        (shm_ptr->num_contorni == 0 || shm_ptr->contorni[c_idx].porzioni_rimanenti > 0)) {
                         
@@ -97,7 +96,15 @@ int main(int argc, char *argv[]) {
                     if (shm_ptr->active_ops[type] > 1) { 
                         shm_ptr->active_ops[type]--; shm_ptr->daily_pauses++; shm_ptr->total_pauses++;
                         semop(semid, &mutex_unlock, 1);
+                        
+                        // 🔴 CORREZIONE: RILASCIA FISICAMENTE LA POSTAZIONE
+                        if (station_sem != -1) semop(semid, &rel_station, 1);
+                        
                         usleep(300000); pauses_taken++;
+                        
+                        // 🔴 CORREZIONE: RIACQUISISCE LA POSTAZIONE (competizione)
+                        if (station_sem != -1) semop(semid, &acq_station, 1);
+                        
                         semop(semid, &mutex_lock, 1); shm_ptr->active_ops[type]++; semop(semid, &mutex_unlock, 1);
                     } else { semop(semid, &mutex_unlock, 1); }
                 }

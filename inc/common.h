@@ -58,8 +58,6 @@ typedef struct {
     int importo;
     int indice_piatto;
     int is_dolce;
-    
-    // Novità per il calcolo preciso del tempo in coda
     int enqueue_time;
     int queue_wait;
 } msg_t;
@@ -77,6 +75,8 @@ typedef struct {
     int current_day;
 
     int op_assignment[MAX_WORKERS];
+    int worker_has_worked[MAX_WORKERS]; // TRACCIA OPERATORI DISTINTI
+    
     int queue_lengths[5];
     int active_ops[5]; 
 
@@ -108,12 +108,13 @@ typedef struct {
     int total_users_dropped;
     int total_revenue;
     int total_pauses;
-    int total_active_ops;
-    int total_dishes_served[5]; // 0=Primi, 1=Secondi, 2=Contorni, 3=Caffe, 4=Dolci
-    int total_dishes_wasted[3]; // 0=Primi, 1=Secondi, 2=Contorni
+    int total_dishes_served[5]; 
+    int total_dishes_wasted[3]; 
     int wait_time_stazioni[5];
     int wait_count_stazioni[5];
 
+    int users_in_mensa; 
+    
 } shared_data_t;
 
 #endif // COMMON_H

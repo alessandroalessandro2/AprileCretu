@@ -40,7 +40,7 @@ int try_food(int msgid, msg_t *req, msg_t *res, size_t msg_size, int type, int n
             return 0; // Mensa chiusa in corsa
         }
     }
-    return 0; 
+    return 0; // Tutte le opzioni di questo tipo sono finite (Esaurito)
 }
 
 int main() {
@@ -56,28 +56,38 @@ int main() {
         struct sembuf wait_start = {SEM_DAY_START, -1, 0}; semop(semid, &wait_start, 1);
         if (!shm_ptr->sim_running) break;
 
+        struct sembuf mutex_lock = {SEM_MUTEX, -1, SEM_UNDO};
+        struct sembuf mutex_unlock = {SEM_MUTEX, 1, SEM_UNDO};
+        semop(semid, &mutex_lock, 1); shm_ptr->users_in_mensa++; semop(semid, &mutex_unlock, 1);
+        
         int sim_active = 1, totale_da_pagare = 0, piatti_acquistati = 0;
         
-        int choice = 3; 
-        if (shm_ptr->queue_lengths[TYPE_PRIMI] > shm_ptr->queue_lengths[TYPE_SECONDI] + 2) choice = 2; 
-        else if (shm_ptr->queue_lengths[TYPE_SECONDI] > shm_ptr->queue_lengths[TYPE_PRIMI] + 2) choice = 1; 
-        
-        // --- 1. PRIMI ---
-        if (sim_active && !shm_ptr->day_ended && (choice == 1 || choice == 3)) {
-            if(try_food(msgid, &req, &res, msg_size, TYPE_PRIMI, shm_ptr->num_primi, mypid, shm_ptr, semid, &totale_da_pagare)) 
-                piatti_acquistati++;
+        // 🔴 CORREZIONE: Stila l'ordine di visita basato sulle code, ma visita ENTRAMBI!
+        int order[2];
+        if (shm_ptr->queue_lengths[TYPE_PRIMI] > shm_ptr->queue_lengths[TYPE_SECONDI] + 2) {
+            order[0] = TYPE_SECONDI; order[1] = TYPE_PRIMI;
+        } else {
+            order[0] = TYPE_PRIMI; order[1] = TYPE_SECONDI;
         }
 
-        // --- 2. SECONDI ---
-        if (sim_active && !shm_ptr->day_ended && (choice == 2 || choice == 3)) {
-            if(try_food(msgid, &req, &res, msg_size, TYPE_SECONDI, shm_ptr->num_secondi, mypid, shm_ptr, semid, &totale_da_pagare)) 
-                piatti_acquistati++;
+        // --- 1. PRIMI e SECONDI (in ordine stabilito) ---
+        for (int i = 0; i < 2; i++) {
+            if (!sim_active || shm_ptr->day_ended) break;
+            
+            int curr_type = order[i];
+            if (curr_type == TYPE_PRIMI) {
+                if(try_food(msgid, &req, &res, msg_size, TYPE_PRIMI, shm_ptr->num_primi, mypid, shm_ptr, semid, &totale_da_pagare)) 
+                    piatti_acquistati++;
+            } else if (curr_type == TYPE_SECONDI) {
+                if(try_food(msgid, &req, &res, msg_size, TYPE_SECONDI, shm_ptr->num_secondi, mypid, shm_ptr, semid, &totale_da_pagare)) 
+                    piatti_acquistati++;
+            }
         }
         
-        // Abbandona SOLO SE voleva mangiare cibo ma tutto è andato esaurito o è scattata la chiusura
+        // Abbandona SOLO SE non ha acquistato neanche mezzo piatto utile
         if (sim_active && totale_da_pagare == 0) sim_active = 0; 
         
-        // --- 3. DOLCE & CAFFE' ---
+        // --- 2. DOLCE & CAFFE' ---
         if (sim_active && !shm_ptr->day_ended && (rand() % 2 == 0)) {
             req.mtype = TYPE_COFFEE; req.sender_pid = mypid; 
             req.is_dolce = (rand() % 2 == 0) ? 1 : 0; 
@@ -97,14 +107,10 @@ int main() {
             if (res.status == STATUS_CLOSED) sim_active = 0;
         }
         
-        // Segna uscita / Rinunciatario
-        struct sembuf mutex_lock = {SEM_MUTEX, -1, SEM_UNDO};
-        struct sembuf mutex_unlock = {SEM_MUTEX, 1, SEM_UNDO};
-        if (!sim_active) { 
-            semop(semid, &mutex_lock, 1);
-            shm_ptr->daily_users_dropped++; shm_ptr->total_users_dropped++; 
-            semop(semid, &mutex_unlock, 1);
-        }
+        semop(semid, &mutex_lock, 1);
+        shm_ptr->users_in_mensa--;
+        if (!sim_active) { shm_ptr->daily_users_dropped++; shm_ptr->total_users_dropped++; }
+        semop(semid, &mutex_unlock, 1);
 
         // --- TAVOLO ---
         if (sim_active) {
