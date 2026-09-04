@@ -37,10 +37,10 @@ int try_food(int msgid, msg_t *req, msg_t *res, size_t msg_size, int type, int n
             else if (type == TYPE_SECONDI) *costo += shm_ptr->secondi[req->indice_piatto].price;
             return 1;
         } else if (res->status == STATUS_CLOSED) {
-            return 0; // Mensa chiusa in corsa
+            return 0; 
         }
     }
-    return 0; // Tutte le opzioni di questo tipo sono finite (Esaurito)
+    return 0; 
 }
 
 int main() {
@@ -62,7 +62,6 @@ int main() {
         
         int sim_active = 1, totale_da_pagare = 0, piatti_acquistati = 0;
         
-        // 🔴 CORREZIONE: Stila l'ordine di visita basato sulle code, ma visita ENTRAMBI!
         int order[2];
         if (shm_ptr->queue_lengths[TYPE_PRIMI] > shm_ptr->queue_lengths[TYPE_SECONDI] + 2) {
             order[0] = TYPE_SECONDI; order[1] = TYPE_PRIMI;
@@ -70,7 +69,7 @@ int main() {
             order[0] = TYPE_PRIMI; order[1] = TYPE_SECONDI;
         }
 
-        // --- 1. PRIMI e SECONDI (in ordine stabilito) ---
+        // --- 1. PRIMI e SECONDI ---
         for (int i = 0; i < 2; i++) {
             if (!sim_active || shm_ptr->day_ended) break;
             
@@ -84,7 +83,6 @@ int main() {
             }
         }
         
-        // Abbandona SOLO SE non ha acquistato neanche mezzo piatto utile
         if (sim_active && totale_da_pagare == 0) sim_active = 0; 
         
         // --- 2. DOLCE & CAFFE' ---

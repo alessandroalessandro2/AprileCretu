@@ -79,7 +79,10 @@ int main(int argc, char *argv[]) {
     }
     
     int total_processes = cfg.nof_workers + 1 + cfg.nof_users;
-    int DAY_LENGTH = 50; 
+    
+    // RISOLTO: Durata giornata basata su minuti simulati fisici (es. 8 ore lavorative = 480 min)
+    int SIMULATED_MINUTES_PER_DAY = 480; 
+    
     shm_ptr->current_day = 1;
     const char* causa_terminazione = "TIMEOUT (Raggiunto limite di giorni impostato)";
     struct sembuf mutex_lock = {SEM_MUTEX, -1, SEM_UNDO};
@@ -99,12 +102,20 @@ int main(int argc, char *argv[]) {
         memset(shm_ptr->daily_wait_time_stazioni, 0, sizeof(shm_ptr->daily_wait_time_stazioni));
         memset(shm_ptr->daily_wait_count_stazioni, 0, sizeof(shm_ptr->daily_wait_count_stazioni));
 
+        // RISOLTO: Assegnazione operatori dinamica e robusta
         memset(shm_ptr->op_assignment, 0, sizeof(shm_ptr->op_assignment));
-        shm_ptr->op_assignment[0] = TYPE_PRIMI; shm_ptr->op_assignment[1] = TYPE_SECONDI; shm_ptr->op_assignment[2] = TYPE_COFFEE;
+        int assigned = 0;
+        if (cfg.nof_workers > 0) shm_ptr->op_assignment[assigned++] = TYPE_PRIMI;
+        if (cfg.nof_workers > 1) shm_ptr->op_assignment[assigned++] = TYPE_SECONDI;
+        if (cfg.nof_workers > 2) shm_ptr->op_assignment[assigned++] = TYPE_COFFEE;
+        
         int max_type = TYPE_PRIMI, max_time = cfg.avg_srvc_primi;
         if(cfg.avg_srvc_secondi > max_time) { max_time = cfg.avg_srvc_secondi; max_type = TYPE_SECONDI; }
         if(cfg.avg_srvc_coffee > max_time)  { max_time = cfg.avg_srvc_coffee; max_type = TYPE_COFFEE; }
-        for(int i = 3; i < cfg.nof_workers; i++) shm_ptr->op_assignment[i] = max_type;
+        
+        while(assigned < cfg.nof_workers) {
+            shm_ptr->op_assignment[assigned++] = max_type;
+        }
 
         for(int i=0; i<shm_ptr->num_primi; i++) shm_ptr->primi[i].porzioni_rimanenti = cfg.avg_refill_primi;
         for(int i=0; i<shm_ptr->num_secondi; i++) shm_ptr->secondi[i].porzioni_rimanenti = cfg.avg_refill_secondi;
@@ -115,7 +126,7 @@ int main(int argc, char *argv[]) {
         struct sembuf start_day = {SEM_DAY_START, total_processes, 0}; semop(semid, &start_day, 1); 
         
         int t = 0;
-        while (t < DAY_LENGTH && shm_ptr->sim_running) {
+        while (t < SIMULATED_MINUTES_PER_DAY && shm_ptr->sim_running) {
             usleep(cfg.n_nano_secs / 1000); 
             semop(semid, &mutex_lock, 1);
             shm_ptr->sim_time++;
@@ -125,19 +136,22 @@ int main(int argc, char *argv[]) {
                 for(int i=0; i<shm_ptr->num_secondi; i++) { shm_ptr->secondi[i].porzioni_rimanenti += cfg.avg_refill_secondi; if(shm_ptr->secondi[i].porzioni_rimanenti > cfg.max_porzioni_secondi) shm_ptr->secondi[i].porzioni_rimanenti = cfg.max_porzioni_secondi; }
                 for(int i=0; i<shm_ptr->num_contorni; i++) { shm_ptr->contorni[i].porzioni_rimanenti += cfg.avg_refill_secondi; if(shm_ptr->contorni[i].porzioni_rimanenti > cfg.max_porzioni_secondi) shm_ptr->contorni[i].porzioni_rimanenti = cfg.max_porzioni_secondi; }
             }
-            
-            int waiting = shm_ptr->queue_lengths[TYPE_PRIMI] + shm_ptr->queue_lengths[TYPE_SECONDI] + shm_ptr->queue_lengths[TYPE_COFFEE] + shm_ptr->queue_lengths[TYPE_CASSA];
-            if (waiting > cfg.overload_threshold) {
-                causa_terminazione = "OVERLOAD (Superata la soglia di utenti in attesa alle stazioni)";
-                printf("\n[!!!] %s.\n", causa_terminazione);
-                shm_ptr->sim_running = 0; 
-            }
             semop(semid, &mutex_unlock, 1);
             t++;
         }
         
         semop(semid, &mutex_lock, 1);
         shm_ptr->day_ended = 1;
+
+        // RISOLTO: Overload controllato al termine della giornata come da consegna
+        int waiting = shm_ptr->queue_lengths[TYPE_PRIMI] + shm_ptr->queue_lengths[TYPE_SECONDI] + shm_ptr->queue_lengths[TYPE_COFFEE] + shm_ptr->queue_lengths[TYPE_CASSA];
+        if (waiting > cfg.overload_threshold) {
+            causa_terminazione = "OVERLOAD (Utenti in attesa a fine giornata superiori alla soglia)";
+            printf("\n[!!!] %s. (In coda: %d)\n", causa_terminazione, waiting);
+            shm_ptr->sim_running = 0; 
+        }
+
+        // Sprechi del giorno
         for(int i=0; i<shm_ptr->num_primi; i++) { shm_ptr->daily_dishes_wasted[0] += shm_ptr->primi[i].porzioni_rimanenti; shm_ptr->total_dishes_wasted[0] += shm_ptr->primi[i].porzioni_rimanenti; }
         for(int i=0; i<shm_ptr->num_secondi; i++) { shm_ptr->daily_dishes_wasted[1] += shm_ptr->secondi[i].porzioni_rimanenti; shm_ptr->total_dishes_wasted[1] += shm_ptr->secondi[i].porzioni_rimanenti; }
         for(int i=0; i<shm_ptr->num_contorni; i++) { shm_ptr->daily_dishes_wasted[2] += shm_ptr->contorni[i].porzioni_rimanenti; shm_ptr->total_dishes_wasted[2] += shm_ptr->contorni[i].porzioni_rimanenti; }
@@ -148,7 +162,7 @@ int main(int argc, char *argv[]) {
                shm_ptr->daily_users_served, shm_ptr->daily_users_dropped, shm_ptr->daily_revenue, shm_ptr->daily_pauses, shm_ptr->daily_active_ops);
         printf("  Piatti Distribuiti -> Primi: %d, Secondi: %d, Contorni: %d, Caffe: %d, Dolci: %d\n", 
                shm_ptr->daily_dishes_served[0], shm_ptr->daily_dishes_served[1], shm_ptr->daily_dishes_served[2], shm_ptr->daily_dishes_served[3], shm_ptr->daily_dishes_served[4]);
-        printf("  Sprechi Giornalieri-> Primi: %d, Secondi: %d, Contorni: %d, Caffe: 0 (illimitati), Dolci: 0 (illimitati)\n", 
+        printf("  Sprechi Giornalieri-> Primi: %d, Secondi: %d, Contorni: %d, Caffe: 0, Dolci: 0\n", 
                shm_ptr->daily_dishes_wasted[0], shm_ptr->daily_dishes_wasted[1], shm_ptr->daily_dishes_wasted[2]);
         
         int d_w1 = shm_ptr->daily_wait_count_stazioni[1]; int d_w2 = shm_ptr->daily_wait_count_stazioni[2];
@@ -169,7 +183,6 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, SIG_IGN);
     int gg = (shm_ptr->current_day > 1) ? (shm_ptr->current_day - 1) : 1;
     
-    // Conteggio effettivo degli operatori fisicamente attivi durante la run
     int oper_distinti = 0;
     for(int i=0; i<MAX_WORKERS; i++) {
         if (shm_ptr->worker_has_worked[i]) oper_distinti++;

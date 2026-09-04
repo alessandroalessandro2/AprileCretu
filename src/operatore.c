@@ -22,7 +22,6 @@ int main(int argc, char *argv[]) {
         
         semop(semid, &mutex_lock, 1);
         int type = shm_ptr->op_assignment[my_id];
-        // Traccia identificativa per il calcolo cumulativo (operatore distinto)
         if(my_id < MAX_WORKERS) shm_ptr->worker_has_worked[my_id] = 1;
         semop(semid, &mutex_unlock, 1);
         
@@ -97,12 +96,13 @@ int main(int argc, char *argv[]) {
                         shm_ptr->active_ops[type]--; shm_ptr->daily_pauses++; shm_ptr->total_pauses++;
                         semop(semid, &mutex_unlock, 1);
                         
-                        // 🔴 CORREZIONE: RILASCIA FISICAMENTE LA POSTAZIONE
                         if (station_sem != -1) semop(semid, &rel_station, 1);
                         
-                        usleep(300000); pauses_taken++;
+                        // RISOLTO: La pausa usa i tempi simulati, es. 15 tick (minuti)
+                        int pause_time_mins = 15;
+                        usleep(pause_time_mins * (cfg.n_nano_secs / 1000));
+                        pauses_taken++;
                         
-                        // 🔴 CORREZIONE: RIACQUISISCE LA POSTAZIONE (competizione)
                         if (station_sem != -1) semop(semid, &acq_station, 1);
                         
                         semop(semid, &mutex_lock, 1); shm_ptr->active_ops[type]++; semop(semid, &mutex_unlock, 1);
