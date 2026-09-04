@@ -75,7 +75,7 @@ typedef struct {
     int current_day;
 
     int op_assignment[MAX_WORKERS];
-    int worker_has_worked[MAX_WORKERS]; // Traccia operatori fisici
+    int worker_has_worked[MAX_WORKERS]; // Traccia operatori fisici distinti
     int cassiere_has_worked;            
     
     int queue_lengths[5];
@@ -86,13 +86,13 @@ typedef struct {
     menu_item_t secondi[MAX_PIATTI];
     menu_item_t contorni[MAX_PIATTI];
     menu_item_t caffe[4];
-    menu_item_t dolci[MAX_PIATTI]; // CORREZIONE: Array di dolci
+    menu_item_t dolci[MAX_PIATTI];
     
     int num_primi;
     int num_secondi;
     int num_contorni;
     int num_caffe;
-    int num_dolci; // CORREZIONE: Contatore dolci
+    int num_dolci;
 
     // --- Statistiche Giornaliere ---
     int daily_users_served;

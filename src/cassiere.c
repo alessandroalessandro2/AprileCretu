@@ -28,7 +28,6 @@ int main(int argc, char *argv[]) {
 
         while(1) {
             if (msgrcv(msgid, &req, msg_size, TYPE_CASSA, IPC_NOWAIT) != -1) {
-                // CORREZIONE: Controllo day_ended fatto in mutua esclusione
                 semop(semid, &mutex_lock, 1);
                 shm_ptr->queue_lengths[TYPE_CASSA]--; 
                 int queue_wait = shm_ptr->sim_time - req.enqueue_time;

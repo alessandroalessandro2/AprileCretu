@@ -25,7 +25,6 @@ int main(int argc, char *argv[]) {
         if(my_id < MAX_WORKERS && type != 0) shm_ptr->worker_has_worked[my_id] = 1;
         semop(semid, &mutex_unlock, 1);
         
-        // 🔴 CORREZIONE: Se non c'è posto fisico, l'operatore va in "Panchina" (TYPE 0) e aspetta fine turno
         if (type == 0) {
             struct sembuf end_day = {SEM_DAY_END, 1, 0}; semop(semid, &end_day, 1);
             continue; 
@@ -72,6 +71,14 @@ int main(int argc, char *argv[]) {
                     }
                 } else if (type == TYPE_SECONDI) {
                     int c_idx = (shm_ptr->num_contorni > 0) ? (req.indice_piatto % shm_ptr->num_contorni) : 0;
+                    
+                    // Cerca il contorno esattamente associato tramite il "price"
+                    for (int i = 0; i < shm_ptr->num_contorni; i++) {
+                        if (shm_ptr->contorni[i].price == req.indice_piatto) {
+                            c_idx = i; break;
+                        }
+                    }
+
                     if (shm_ptr->secondi[req.indice_piatto].porzioni_rimanenti > 0 &&
                        (shm_ptr->num_contorni == 0 || shm_ptr->contorni[c_idx].porzioni_rimanenti > 0)) {
                         

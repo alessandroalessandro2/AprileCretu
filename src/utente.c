@@ -51,6 +51,9 @@ int main(int argc, char *argv[]) {
     shared_data_t *shm_ptr = (shared_data_t*) shmat(shmid, NULL, 0); pid_t mypid = getpid();
     msg_t req, res; size_t msg_size = sizeof(msg_t) - sizeof(long);
     
+    struct sembuf mutex_lock = {SEM_MUTEX, -1, SEM_UNDO};
+    struct sembuf mutex_unlock = {SEM_MUTEX, 1, SEM_UNDO};
+
     while(1) {
         struct sembuf signal_ready = {SEM_READY, 1, 0}; semop(semid, &signal_ready, 1);
         struct sembuf wait_start = {SEM_DAY_START, -1, 0}; semop(semid, &wait_start, 1);
@@ -59,21 +62,25 @@ int main(int argc, char *argv[]) {
         int decides_to_eat = (rand() % 100 < 85);
 
         if (decides_to_eat) {
-            struct sembuf mutex_lock = {SEM_MUTEX, -1, SEM_UNDO};
-            struct sembuf mutex_unlock = {SEM_MUTEX, 1, SEM_UNDO};
-            semop(semid, &mutex_lock, 1); shm_ptr->users_in_mensa++; semop(semid, &mutex_unlock, 1);
+            semop(semid, &mutex_lock, 1); 
+            shm_ptr->users_in_mensa++; 
+            int q_primi = shm_ptr->queue_lengths[TYPE_PRIMI];
+            int q_secondi = shm_ptr->queue_lengths[TYPE_SECONDI];
+            semop(semid, &mutex_unlock, 1);
             
             int sim_active = 1, totale_da_pagare = 0, piatti_acquistati = 0;
             
             int order[2];
-            if (shm_ptr->queue_lengths[TYPE_PRIMI] > shm_ptr->queue_lengths[TYPE_SECONDI] + 2) {
+            if (q_primi > q_secondi + 2) {
                 order[0] = TYPE_SECONDI; order[1] = TYPE_PRIMI;
             } else {
                 order[0] = TYPE_PRIMI; order[1] = TYPE_SECONDI;
             }
 
             for (int i = 0; i < 2; i++) {
-                if (!sim_active || shm_ptr->day_ended) break;
+                semop(semid, &mutex_lock, 1); int is_ended = shm_ptr->day_ended; semop(semid, &mutex_unlock, 1);
+                if (!sim_active || is_ended) break;
+
                 int curr_type = order[i];
                 if (curr_type == TYPE_PRIMI) {
                     if(try_food(msgid, &req, &res, msg_size, TYPE_PRIMI, shm_ptr->num_primi, mypid, shm_ptr, semid, &totale_da_pagare)) 
@@ -86,7 +93,8 @@ int main(int argc, char *argv[]) {
             
             if (sim_active && totale_da_pagare == 0) sim_active = 0; 
             
-            if (sim_active && !shm_ptr->day_ended && (rand() % 2 == 0)) {
+            semop(semid, &mutex_lock, 1); int is_ended = shm_ptr->day_ended; semop(semid, &mutex_unlock, 1);
+            if (sim_active && !is_ended && (rand() % 2 == 0)) {
                 req.mtype = TYPE_COFFEE; req.sender_pid = mypid; 
                 req.is_dolce = (rand() % 2 == 0) ? 1 : 0; 
                 
@@ -105,26 +113,28 @@ int main(int argc, char *argv[]) {
                 } else if (res.status == STATUS_CLOSED) sim_active = 0;
             }
             
-            if (sim_active && !shm_ptr->day_ended) {
+            semop(semid, &mutex_lock, 1); is_ended = shm_ptr->day_ended; semop(semid, &mutex_unlock, 1);
+            if (sim_active && !is_ended) {
                 req.mtype = TYPE_CASSA; req.sender_pid = mypid; req.importo = totale_da_pagare;
                 wait_and_track(msgid, &req, &res, msg_size, TYPE_CASSA, mypid, shm_ptr, semid);
                 if (res.status == STATUS_CLOSED) sim_active = 0;
             }
             
-            // --- TAVOLO ---
             if (sim_active) {
                 struct sembuf table_wait_nowait = {SEM_TAVOLI, -1, IPC_NOWAIT}; 
                 struct sembuf table_signal = {SEM_TAVOLI, 1, SEM_UNDO};
                 int table_acquired = 0;
 
-                while (!shm_ptr->day_ended) {
+                while (1) {
+                    semop(semid, &mutex_lock, 1); is_ended = shm_ptr->day_ended; semop(semid, &mutex_unlock, 1);
+                    if (is_ended) break;
+
                     if (semop(semid, &table_wait_nowait, 1) != -1) {
                         table_acquired = 1;
                         break;
                     }
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                        usleep(50000); 
-                    } else break;
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) usleep(50000); 
+                    else break;
                 }
 
                 if (table_acquired) {
@@ -132,20 +142,16 @@ int main(int argc, char *argv[]) {
                     usleep(base_eat_us);
                     semop(semid, &table_signal, 1);
                 } else {
-                    sim_active = 0; // L'utente scappa se la mensa chiude mentre aspetta
+                    sim_active = 0; 
                 }
             }
 
-            // 🔴 SPOSTATO ALLA FINE: Ora include anche gli sfortunati rimasti in piedi al tavolo!
             semop(semid, &mutex_lock, 1);
             shm_ptr->users_in_mensa--;
-            if (!sim_active) { 
-                shm_ptr->daily_users_dropped++; 
-                shm_ptr->total_users_dropped++; 
-            }
+            if (!sim_active) { shm_ptr->daily_users_dropped++; shm_ptr->total_users_dropped++; }
             semop(semid, &mutex_unlock, 1);
 
-        } // Fine if(decides_to_eat)
+        }
 
         struct sembuf end_day = {SEM_DAY_END, 1, 0}; semop(semid, &end_day, 1);
     }
