@@ -79,8 +79,6 @@ int main(int argc, char *argv[]) {
     }
     
     int total_processes = cfg.nof_workers + 1 + cfg.nof_users;
-    
-    // RISOLTO: Durata giornata basata su minuti simulati fisici (es. 8 ore lavorative = 480 min)
     int SIMULATED_MINUTES_PER_DAY = 480; 
     
     shm_ptr->current_day = 1;
@@ -102,7 +100,6 @@ int main(int argc, char *argv[]) {
         memset(shm_ptr->daily_wait_time_stazioni, 0, sizeof(shm_ptr->daily_wait_time_stazioni));
         memset(shm_ptr->daily_wait_count_stazioni, 0, sizeof(shm_ptr->daily_wait_count_stazioni));
 
-        // RISOLTO: Assegnazione operatori dinamica e robusta
         memset(shm_ptr->op_assignment, 0, sizeof(shm_ptr->op_assignment));
         int assigned = 0;
         if (cfg.nof_workers > 0) shm_ptr->op_assignment[assigned++] = TYPE_PRIMI;
@@ -112,10 +109,7 @@ int main(int argc, char *argv[]) {
         int max_type = TYPE_PRIMI, max_time = cfg.avg_srvc_primi;
         if(cfg.avg_srvc_secondi > max_time) { max_time = cfg.avg_srvc_secondi; max_type = TYPE_SECONDI; }
         if(cfg.avg_srvc_coffee > max_time)  { max_time = cfg.avg_srvc_coffee; max_type = TYPE_COFFEE; }
-        
-        while(assigned < cfg.nof_workers) {
-            shm_ptr->op_assignment[assigned++] = max_type;
-        }
+        while(assigned < cfg.nof_workers) shm_ptr->op_assignment[assigned++] = max_type;
 
         for(int i=0; i<shm_ptr->num_primi; i++) shm_ptr->primi[i].porzioni_rimanenti = cfg.avg_refill_primi;
         for(int i=0; i<shm_ptr->num_secondi; i++) shm_ptr->secondi[i].porzioni_rimanenti = cfg.avg_refill_secondi;
@@ -143,36 +137,74 @@ int main(int argc, char *argv[]) {
         semop(semid, &mutex_lock, 1);
         shm_ptr->day_ended = 1;
 
-        // RISOLTO: Overload controllato al termine della giornata come da consegna
         int waiting = shm_ptr->queue_lengths[TYPE_PRIMI] + shm_ptr->queue_lengths[TYPE_SECONDI] + shm_ptr->queue_lengths[TYPE_COFFEE] + shm_ptr->queue_lengths[TYPE_CASSA];
         if (waiting > cfg.overload_threshold) {
             causa_terminazione = "OVERLOAD (Utenti in attesa a fine giornata superiori alla soglia)";
-            printf("\n[!!!] %s. (In coda: %d)\n", causa_terminazione, waiting);
             shm_ptr->sim_running = 0; 
         }
 
-        // Sprechi del giorno
+        // Calcolo Sprechi giornalieri e cumulativi
         for(int i=0; i<shm_ptr->num_primi; i++) { shm_ptr->daily_dishes_wasted[0] += shm_ptr->primi[i].porzioni_rimanenti; shm_ptr->total_dishes_wasted[0] += shm_ptr->primi[i].porzioni_rimanenti; }
         for(int i=0; i<shm_ptr->num_secondi; i++) { shm_ptr->daily_dishes_wasted[1] += shm_ptr->secondi[i].porzioni_rimanenti; shm_ptr->total_dishes_wasted[1] += shm_ptr->secondi[i].porzioni_rimanenti; }
         for(int i=0; i<shm_ptr->num_contorni; i++) { shm_ptr->daily_dishes_wasted[2] += shm_ptr->contorni[i].porzioni_rimanenti; shm_ptr->total_dishes_wasted[2] += shm_ptr->contorni[i].porzioni_rimanenti; }
 
-        printf("\n--- FINE GIORNO %d ---\n", shm_ptr->current_day);
-        printf("[Statistiche Giornaliere]\n");
-        printf("  Serviti: %d, Rinunce: %d, Incasso: %d euro, Pause: %d, Op. Attivi: %d\n", 
-               shm_ptr->daily_users_served, shm_ptr->daily_users_dropped, shm_ptr->daily_revenue, shm_ptr->daily_pauses, shm_ptr->daily_active_ops);
-        printf("  Piatti Distribuiti -> Primi: %d, Secondi: %d, Contorni: %d, Caffe: %d, Dolci: %d\n", 
+        // Muro delle statistiche obbligatorie
+        int gg = shm_ptr->current_day;
+        
+        // Calcoli per attesa giornaliera e storica
+        int d_w1 = shm_ptr->daily_wait_count_stazioni[1], d_w2 = shm_ptr->daily_wait_count_stazioni[2];
+        int d_w3 = shm_ptr->daily_wait_count_stazioni[3], d_w4 = shm_ptr->daily_wait_count_stazioni[4];
+        int d_tot_w = d_w1+d_w2+d_w3+d_w4;
+        int d_tot_time = shm_ptr->daily_wait_time_stazioni[1] + shm_ptr->daily_wait_time_stazioni[2] + shm_ptr->daily_wait_time_stazioni[3] + shm_ptr->daily_wait_time_stazioni[4];
+        
+        int t_w1 = shm_ptr->wait_count_stazioni[1], t_w2 = shm_ptr->wait_count_stazioni[2];
+        int t_w3 = shm_ptr->wait_count_stazioni[3], t_w4 = shm_ptr->wait_count_stazioni[4];
+        int t_tot_w = t_w1+t_w2+t_w3+t_w4;
+        int t_tot_time = shm_ptr->wait_time_stazioni[1] + shm_ptr->wait_time_stazioni[2] + shm_ptr->wait_time_stazioni[3] + shm_ptr->wait_time_stazioni[4];
+
+        int oper_distinti = 0;
+        for(int i=0; i<MAX_WORKERS; i++) if (shm_ptr->worker_has_worked[i]) oper_distinti++;
+
+        printf("\n--- FINE GIORNO %d ---\n", gg);
+        
+        printf(">>> STATISTICHE DELLA GIORNATA <<<\n");
+        printf("- Utenti serviti oggi: %d\n", shm_ptr->daily_users_served);
+        printf("- Utenti non serviti (rinunce) oggi: %d\n", shm_ptr->daily_users_dropped);
+        printf("- Incasso di oggi: %d euro\n", shm_ptr->daily_revenue);
+        printf("- Pause effettuate oggi dallo staff: %d\n", shm_ptr->daily_pauses);
+        printf("- Operatori attivi oggi: %d\n", shm_ptr->daily_active_ops);
+        printf("- Piatti Distribuiti (Oggi): Primi=%d, Secondi=%d, Contorni=%d, Caffe=%d, Dolci=%d\n", 
                shm_ptr->daily_dishes_served[0], shm_ptr->daily_dishes_served[1], shm_ptr->daily_dishes_served[2], shm_ptr->daily_dishes_served[3], shm_ptr->daily_dishes_served[4]);
-        printf("  Sprechi Giornalieri-> Primi: %d, Secondi: %d, Contorni: %d, Caffe: 0, Dolci: 0\n", 
+        printf("- Piatti Avanzati/Sprechi (Oggi): Primi=%d, Secondi=%d, Contorni=%d, Caffe/Dolci=0 (Illimitati)\n", 
                shm_ptr->daily_dishes_wasted[0], shm_ptr->daily_dishes_wasted[1], shm_ptr->daily_dishes_wasted[2]);
-        
-        int d_w1 = shm_ptr->daily_wait_count_stazioni[1]; int d_w2 = shm_ptr->daily_wait_count_stazioni[2];
-        int d_w3 = shm_ptr->daily_wait_count_stazioni[3]; int d_w4 = shm_ptr->daily_wait_count_stazioni[4];
-        printf("  Attesa Media (tick)-> Primi: %d, Secondi: %d, Caffe: %d, Cassa: %d\n",
-            d_w1 > 0 ? shm_ptr->daily_wait_time_stazioni[1]/d_w1 : 0, d_w2 > 0 ? shm_ptr->daily_wait_time_stazioni[2]/d_w2 : 0,
-            d_w3 > 0 ? shm_ptr->daily_wait_time_stazioni[3]/d_w3 : 0, d_w4 > 0 ? shm_ptr->daily_wait_time_stazioni[4]/d_w4 : 0);
-        
-        printf("\n[Statistiche Cumulative (Fino al giorno %d)]\n", shm_ptr->current_day);
-        printf("  Serviti Totali: %d, Rinunce Totali: %d, Incasso Totale: %d\n", shm_ptr->total_users_served, shm_ptr->total_users_dropped, shm_ptr->total_revenue);
+        printf("- Attesa Media (Oggi): Primi=%d, Secondi=%d, Caffe=%d, Cassa=%d | Complessiva Oggi: %d\n",
+               d_w1 > 0 ? shm_ptr->daily_wait_time_stazioni[1]/d_w1 : 0, d_w2 > 0 ? shm_ptr->daily_wait_time_stazioni[2]/d_w2 : 0,
+               d_w3 > 0 ? shm_ptr->daily_wait_time_stazioni[3]/d_w3 : 0, d_w4 > 0 ? shm_ptr->daily_wait_time_stazioni[4]/d_w4 : 0,
+               d_tot_w > 0 ? d_tot_time / d_tot_w : 0);
+
+        printf("\n>>> STATISTICHE CUMULATIVE E MEDIE (Fino al giorno %d) <<<\n", gg);
+        printf("- Utenti serviti: Totale=%d, Media/gg=%.1f\n", shm_ptr->total_users_served, (float)shm_ptr->total_users_served/gg);
+        printf("- Utenti non serviti: Totale=%d, Media/gg=%.1f\n", shm_ptr->total_users_dropped, (float)shm_ptr->total_users_dropped/gg);
+        printf("- Incasso: Totale=%d euro, Media/gg=%.1f euro\n", shm_ptr->total_revenue, (float)shm_ptr->total_revenue/gg);
+        printf("- Operatori distinti attivi nella simulazione finora: %d\n", oper_distinti);
+        printf("- Pause staff: Totale=%d, Media/gg=%.1f\n", shm_ptr->total_pauses, (float)shm_ptr->total_pauses/gg);
+        printf("- Piatti Distribuiti (Totali e Medie/gg):\n");
+        printf("    Primi: %d (%.1f/gg), Secondi: %d (%.1f/gg), Contorni: %d (%.1f/gg)\n",
+               shm_ptr->total_dishes_served[0], (float)shm_ptr->total_dishes_served[0]/gg,
+               shm_ptr->total_dishes_served[1], (float)shm_ptr->total_dishes_served[1]/gg,
+               shm_ptr->total_dishes_served[2], (float)shm_ptr->total_dishes_served[2]/gg);
+        printf("    Caffe: %d (%.1f/gg), Dolci: %d (%.1f/gg)\n",
+               shm_ptr->total_dishes_served[3], (float)shm_ptr->total_dishes_served[3]/gg,
+               shm_ptr->total_dishes_served[4], (float)shm_ptr->total_dishes_served[4]/gg);
+        printf("- Piatti Avanzati (Totali e Medie/gg):\n");
+        printf("    Primi: %d (%.1f/gg), Secondi: %d (%.1f/gg), Contorni: %d (%.1f/gg), Caffe/Dolci: 0\n",
+               shm_ptr->total_dishes_wasted[0], (float)shm_ptr->total_dishes_wasted[0]/gg,
+               shm_ptr->total_dishes_wasted[1], (float)shm_ptr->total_dishes_wasted[1]/gg,
+               shm_ptr->total_dishes_wasted[2], (float)shm_ptr->total_dishes_wasted[2]/gg);
+        printf("- Attesa Media (Storica): Primi=%d, Secondi=%d, Caffe=%d, Cassa=%d | Complessiva Storica: %d\n",
+               t_w1 > 0 ? shm_ptr->wait_time_stazioni[1]/t_w1 : 0, t_w2 > 0 ? shm_ptr->wait_time_stazioni[2]/t_w2 : 0,
+               t_w3 > 0 ? shm_ptr->wait_time_stazioni[3]/t_w3 : 0, t_w4 > 0 ? shm_ptr->wait_time_stazioni[4]/t_w4 : 0,
+               t_tot_w > 0 ? t_tot_time / t_tot_w : 0);
 
         shm_ptr->current_day++;
         semop(semid, &mutex_unlock, 1);
@@ -181,39 +213,9 @@ int main(int argc, char *argv[]) {
     }
     
     signal(SIGTERM, SIG_IGN);
-    int gg = (shm_ptr->current_day > 1) ? (shm_ptr->current_day - 1) : 1;
-    
-    int oper_distinti = 0;
-    for(int i=0; i<MAX_WORKERS; i++) {
-        if (shm_ptr->worker_has_worked[i]) oper_distinti++;
-    }
-
-    printf("\n=================================\n     STATISTICHE FINALI MENSA    \n=================================\n");
-    printf("Causa Terminazione: %s\n", causa_terminazione);
-    printf("Utenti serviti: %d (Media/gg: %.1f)\n", shm_ptr->total_users_served, (float)shm_ptr->total_users_served / gg);
-    printf("Utenti rinunciatari: %d (Media/gg: %.1f)\n", shm_ptr->total_users_dropped, (float)shm_ptr->total_users_dropped / gg);
-    printf("Incasso Totale: %d euro (Media/gg: %.1f euro)\n", shm_ptr->total_revenue, (float)shm_ptr->total_revenue / gg);
-    printf("Piatti distribuiti - Primi: %d (%.1f/gg), Secondi: %d (%.1f/gg), Contorni: %d (%.1f/gg), Caffe: %d (%.1f/gg), Dolci: %d (%.1f/gg)\n", 
-           shm_ptr->total_dishes_served[0], (float)shm_ptr->total_dishes_served[0]/gg,
-           shm_ptr->total_dishes_served[1], (float)shm_ptr->total_dishes_served[1]/gg,
-           shm_ptr->total_dishes_served[2], (float)shm_ptr->total_dishes_served[2]/gg,
-           shm_ptr->total_dishes_served[3], (float)shm_ptr->total_dishes_served[3]/gg,
-           shm_ptr->total_dishes_served[4], (float)shm_ptr->total_dishes_served[4]/gg);
-    printf("Sprechi - Primi: %d (%.1f/gg), Secondi: %d (%.1f/gg), Contorni: %d (%.1f/gg), Caffe/Dolci: 0 (illimitati)\n", 
-           shm_ptr->total_dishes_wasted[0], (float)shm_ptr->total_dishes_wasted[0]/gg,
-           shm_ptr->total_dishes_wasted[1], (float)shm_ptr->total_dishes_wasted[1]/gg,
-           shm_ptr->total_dishes_wasted[2], (float)shm_ptr->total_dishes_wasted[2]/gg);
-    printf("Pause totali: %d (Media/gg: %.1f)\n", shm_ptr->total_pauses, (float)shm_ptr->total_pauses / gg);
-    printf("Operatori DISTINTI attivi (almeno un turno): %d\n", oper_distinti);
-    
-    printf("\n--- TEMPI MEDI DI ATTESA STORICI (tick coda) ---\n");
-    int tot_wt = 0, tot_wc = 0;
-    for(int i=1; i<=4; i++) {
-        tot_wt += shm_ptr->wait_time_stazioni[i]; tot_wc += shm_ptr->wait_count_stazioni[i];
-        if(shm_ptr->wait_count_stazioni[i] > 0) printf("Stazione %d: %d\n", i, shm_ptr->wait_time_stazioni[i] / shm_ptr->wait_count_stazioni[i]);
-    }
-    if(tot_wc > 0) printf("Attesa media complessiva storica: %d\n", tot_wt / tot_wc);
-    printf("=================================\n");
+    printf("\n=======================================================\n");
+    printf("  SIMULAZIONE TERMINATA - CAUSA: %s\n", causa_terminazione);
+    printf("=======================================================\n");
     
     kill(0, SIGTERM); while (wait(NULL) > 0); cleanup(0);
     return 0;

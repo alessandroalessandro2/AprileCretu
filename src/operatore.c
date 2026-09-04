@@ -61,10 +61,8 @@ int main(int argc, char *argv[]) {
                     int c_idx = req.indice_piatto % shm_ptr->num_contorni;
                     if (shm_ptr->secondi[req.indice_piatto].porzioni_rimanenti > 0 &&
                        (shm_ptr->num_contorni == 0 || shm_ptr->contorni[c_idx].porzioni_rimanenti > 0)) {
-                        
                         shm_ptr->secondi[req.indice_piatto].porzioni_rimanenti--;
                         shm_ptr->total_dishes_served[1]++; shm_ptr->daily_dishes_served[1]++;
-                        
                         if(shm_ptr->num_contorni > 0) {
                             shm_ptr->contorni[c_idx].porzioni_rimanenti--;
                             shm_ptr->total_dishes_served[2]++; shm_ptr->daily_dishes_served[2]++;
@@ -85,9 +83,7 @@ int main(int argc, char *argv[]) {
                     usleep(actual_time * (cfg.n_nano_secs / 1000));
                 }
                 
-                res.mtype = req.sender_pid; 
-                res.status = status;
-                res.queue_wait = queue_wait; 
+                res.mtype = req.sender_pid; res.status = status; res.queue_wait = queue_wait; 
                 msgsnd(msgid, &res, msg_size, 0);
                 
                 if (status == STATUS_SERVED && pauses_taken < cfg.nof_pause && (rand() % 100 < 10)) {
@@ -97,12 +93,9 @@ int main(int argc, char *argv[]) {
                         semop(semid, &mutex_unlock, 1);
                         
                         if (station_sem != -1) semop(semid, &rel_station, 1);
-                        
-                        // RISOLTO: La pausa usa i tempi simulati, es. 15 tick (minuti)
                         int pause_time_mins = 15;
                         usleep(pause_time_mins * (cfg.n_nano_secs / 1000));
                         pauses_taken++;
-                        
                         if (station_sem != -1) semop(semid, &acq_station, 1);
                         
                         semop(semid, &mutex_lock, 1); shm_ptr->active_ops[type]++; semop(semid, &mutex_unlock, 1);

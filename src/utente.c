@@ -36,9 +36,7 @@ int try_food(int msgid, msg_t *req, msg_t *res, size_t msg_size, int type, int n
             if (type == TYPE_PRIMI) *costo += shm_ptr->primi[req->indice_piatto].price;
             else if (type == TYPE_SECONDI) *costo += shm_ptr->secondi[req->indice_piatto].price;
             return 1;
-        } else if (res->status == STATUS_CLOSED) {
-            return 0; 
-        }
+        } else if (res->status == STATUS_CLOSED) return 0;
     }
     return 0; 
 }
@@ -48,7 +46,6 @@ int main() {
     int msgid = msgget(MSG_KEY, 0666); int shmid = shmget(SHM_KEY, sizeof(shared_data_t), 0666);
     int semid = semget(SEM_KEY, 9, 0666);
     shared_data_t *shm_ptr = (shared_data_t*) shmat(shmid, NULL, 0); pid_t mypid = getpid();
-    
     msg_t req, res; size_t msg_size = sizeof(msg_t) - sizeof(long);
     
     while(1) {
@@ -69,10 +66,8 @@ int main() {
             order[0] = TYPE_PRIMI; order[1] = TYPE_SECONDI;
         }
 
-        // --- 1. PRIMI e SECONDI ---
         for (int i = 0; i < 2; i++) {
             if (!sim_active || shm_ptr->day_ended) break;
-            
             int curr_type = order[i];
             if (curr_type == TYPE_PRIMI) {
                 if(try_food(msgid, &req, &res, msg_size, TYPE_PRIMI, shm_ptr->num_primi, mypid, shm_ptr, semid, &totale_da_pagare)) 
@@ -85,7 +80,6 @@ int main() {
         
         if (sim_active && totale_da_pagare == 0) sim_active = 0; 
         
-        // --- 2. DOLCE & CAFFE' ---
         if (sim_active && !shm_ptr->day_ended && (rand() % 2 == 0)) {
             req.mtype = TYPE_COFFEE; req.sender_pid = mypid; 
             req.is_dolce = (rand() % 2 == 0) ? 1 : 0; 
@@ -98,7 +92,6 @@ int main() {
             } else if (res.status == STATUS_CLOSED) sim_active = 0;
         }
         
-        // --- CASSA ---
         if (sim_active && !shm_ptr->day_ended) {
             req.mtype = TYPE_CASSA; req.sender_pid = mypid; req.importo = totale_da_pagare;
             wait_and_track(msgid, &req, &res, msg_size, TYPE_CASSA, mypid, shm_ptr, semid);
@@ -110,7 +103,6 @@ int main() {
         if (!sim_active) { shm_ptr->daily_users_dropped++; shm_ptr->total_users_dropped++; }
         semop(semid, &mutex_unlock, 1);
 
-        // --- TAVOLO ---
         if (sim_active) {
             struct sembuf table_wait = {SEM_TAVOLI, -1, SEM_UNDO}; struct sembuf table_signal = {SEM_TAVOLI, 1, SEM_UNDO};
             if (semop(semid, &table_wait, 1) != -1) {
