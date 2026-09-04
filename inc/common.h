@@ -10,97 +10,90 @@
 #include <sys/sem.h>
 #include <sys/msg.h>
 #include <sys/wait.h>
+#include <string.h>
 #include <time.h>
 #include <signal.h>
-#include <string.h>
-#include <errno.h>
-
 #include "config_parser.h"
 
-// CHIAVI IPC
-#define SHM_KEY 0x1A2B
-#define SEM_KEY 0x3C4D
-#define MSG_KEY 0x5E6F
+#define SHM_KEY 0x1234
+#define SEM_KEY 0x5678
+#define MSG_KEY 0x9ABC
 
-// INDICI SEMAFORI (Totale: 7)
-#define SEM_MUTEX   0  // Mutua esclusione sulla Shared Memory
-#define SEM_TAVOLI  1  // Posti a sedere disponibili
-#define SEM_PRIMI   2  // Postazioni stazione Primi
-#define SEM_SECONDI 3  // Postazioni stazione Secondi
-#define SEM_COFFEE  4  // Postazioni stazione Caffè
-#define SEM_CASSA   5  // Postazioni Cassa
-#define SEM_SYNC    6  // Barriera di sincronizzazione iniziale
-
+// Definizione dei 7 semafori totali
 #define NUM_SEMAPHORES 7
+#define SEM_MUTEX 0
+#define SEM_TAVOLI 1
+#define SEM_PRIMI 2
+#define SEM_SECONDI 3
+#define SEM_COFFEE 4
+#define SEM_CASSA 5
+#define SEM_SYNC 6
 
-// TIPI MESSAGGIO PER LE CODE IPC
-#define TYPE_PRIMI    1
-#define TYPE_SECONDI  2
-#define TYPE_COFFEE   3
-#define TYPE_CASSA    4
+#define TYPE_PRIMI 1
+#define TYPE_SECONDI 2
+#define TYPE_COFFEE 3
+#define TYPE_CASSA 4
 
-// UNION PER SEMAFORI (Necessaria per semctl su Linux/Mac)
+#define MAX_PIATTI 10
+
 union semun {
     int val;
     struct semid_ds *buf;
     unsigned short *array;
 };
 
-// STRUTTURA MESSAGGIO
-typedef struct {
-    long mtype;          // PID destinatario oppure TYPE_STAZIONE
-    int sender_pid;
-    int status;          // 1 = servito / ok, 0 = esaurito / fallito
-    int importo;
-    int indice_piatto;
-} msg_t;
-
-#define MAX_PIATTI 10
-
-// STRUTTURA PIATTO DEL MENU
 typedef struct {
     char name[32];
     int price;
     int porzioni_rimanenti;
-} menu_item_t;
+} piatto_t;
 
-// STRUTTURA MEMORIA CONDIVISA
 typedef struct {
-    int sim_time;         
-    int users_served;     
-    int users_dropped;    
-    int users_waiting;    
-    int revenue;          
+    long mtype;
+    pid_t sender_pid;
+    int indice_piatto;
+    int importo;
+    int status;
+} msg_t;
+
+typedef struct {
+    int sim_running;
+    int sim_time;
     
-    // Piatti serviti: [0]=Primi, [1]=Secondi, [2]=Caffè
-    int dishes_served[3]; 
-    // Piatti avanzati/buttati a fine giornata: [0]=Primi, [1]=Secondi, [2]=Caffè
-    int dishes_wasted[3]; 
+    // Menu
+    piatto_t primi[MAX_PIATTI];
+    int num_primi;
+    piatto_t secondi[MAX_PIATTI];
+    int num_secondi;
+    piatto_t dolce;
+    piatto_t caffe[4];
+    int num_caffe;
     
-    int portions_primi;   
-    int portions_secondi; 
-    int sim_running;      
+    int portions_primi;
+    int portions_secondi;
     
-    int ready_count;      
-    
-    // Contatori operatori attivi per stazione (1=Primi, 2=Secondi, 3=Caffè, 4=Cassa)
-    int active_ops[5]; 
+    // Statistiche Globali
+    int users_waiting;
+    int users_served;
+    int users_dropped;
+    int revenue;
+    int dishes_served[3]; // [0]=Primi, [1]=Secondi, [2]=Caffè
+    int active_ops[5];
     int total_pauses;
     
-    // Variabili per il Menu
-    menu_item_t primi[MAX_PIATTI];
-    menu_item_t secondi[MAX_PIATTI];
-    menu_item_t dolce;
-    menu_item_t caffe[4]; // 4 tipologie richieste dal bando
-    
-    int num_primi;
-    int num_secondi;
-    int num_caffe;
-
-    // Statistiche tempi di attesa (in secondi o minuti simulati)
     double total_wait_time;
-    double wait_time_stazioni[5]; // [1]=Primi, [2]=Secondi, [3]=Caffè, [4]=Cassa
+    double wait_time_stazioni[5];
     int wait_count_stazioni[5];
+
+    // --- STATISTICHE GIORNALIERE (Punto 4 del Bando) ---
+    int daily_users_served;
+    int daily_users_dropped;
+    int daily_revenue;
+    int daily_dishes_served[3];
+    int daily_pauses;
+    double daily_total_wait_time;
+    int daily_wait_count;
+    
 } shared_data_t;
 
-#endif // COMMON_H
+#endif
