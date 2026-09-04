@@ -9,7 +9,7 @@ void load_menu_and_prices(const char *filename, shared_data_t *shm, config_t *cf
     char line[256];
     shm->num_primi = 0; shm->num_secondi = 0; shm->num_contorni = 0; shm->num_caffe = 0; shm->num_dolci = 0;
     
-    for (int i=0; i<MAX_PIATTI; i++) shm->contorni[i].price = -1; 
+    for (int i=0; i<MAX_PIATTI; i++) shm->contorni[i].secondo_associato = -1; 
     
     while (fgets(line, sizeof(line), file)) {
         if (line[0] == '\n' || line[0] == '#') continue;
@@ -27,7 +27,8 @@ void load_menu_and_prices(const char *filename, shared_data_t *shm, config_t *cf
                 shm->num_secondi++;
             } else if (strcmp(type, "CONTORNO") == 0 && shm->num_contorni < MAX_PIATTI) {
                 strncpy(shm->contorni[shm->num_contorni].name, name, 31);
-                shm->contorni[shm->num_contorni].price = (parsed == 4) ? p2 : shm->num_contorni; 
+                shm->contorni[shm->num_contorni].price = p1; 
+                shm->contorni[shm->num_contorni].secondo_associato = (parsed == 4) ? p2 : shm->num_contorni; 
                 shm->num_contorni++;
             } else if (strcmp(type, "CAFFE") == 0 && shm->num_caffe < 4) {
                 strncpy(shm->caffe[shm->num_caffe].name, name, 31);

@@ -66,6 +66,7 @@ typedef struct {
     char name[32];
     int price;
     int porzioni_rimanenti;
+    int secondo_associato; // 🔴 CORREZIONE: Campo dedicato per la logica dei contorni
 } menu_item_t;
 
 typedef struct {
@@ -75,7 +76,7 @@ typedef struct {
     int current_day;
 
     int op_assignment[MAX_WORKERS];
-    int worker_has_worked[MAX_WORKERS]; // Traccia operatori fisici distinti
+    int worker_has_worked[MAX_WORKERS]; 
     int cassiere_has_worked;            
     
     int queue_lengths[5];

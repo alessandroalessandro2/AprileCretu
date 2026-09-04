@@ -70,22 +70,21 @@ int main(int argc, char *argv[]) {
                         status = STATUS_SERVED;
                     }
                 } else if (type == TYPE_SECONDI) {
-                    int c_idx = (shm_ptr->num_contorni > 0) ? (req.indice_piatto % shm_ptr->num_contorni) : 0;
-                    
-                    // Cerca il contorno esattamente associato tramite il "price"
+                    int c_idx = -1;
+                    // 🔴 Cerca il contorno usando il campo esatto secondo_associato
                     for (int i = 0; i < shm_ptr->num_contorni; i++) {
-                        if (shm_ptr->contorni[i].price == req.indice_piatto) {
+                        if (shm_ptr->contorni[i].secondo_associato == req.indice_piatto) {
                             c_idx = i; break;
                         }
                     }
 
                     if (shm_ptr->secondi[req.indice_piatto].porzioni_rimanenti > 0 &&
-                       (shm_ptr->num_contorni == 0 || shm_ptr->contorni[c_idx].porzioni_rimanenti > 0)) {
+                       (shm_ptr->num_contorni == 0 || (c_idx != -1 && shm_ptr->contorni[c_idx].porzioni_rimanenti > 0))) {
                         
                         shm_ptr->secondi[req.indice_piatto].porzioni_rimanenti--;
                         shm_ptr->total_dishes_served[1]++; shm_ptr->daily_dishes_served[1]++;
                         
-                        if(shm_ptr->num_contorni > 0) {
+                        if(shm_ptr->num_contorni > 0 && c_idx != -1) {
                             shm_ptr->contorni[c_idx].porzioni_rimanenti--;
                             shm_ptr->total_dishes_served[2]++; shm_ptr->daily_dishes_served[2]++;
                         }
