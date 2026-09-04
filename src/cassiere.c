@@ -21,7 +21,9 @@ int main(int argc, char *argv[]) {
 
         semop(semid, &acq_station, 1);
         semop(semid, &mutex_lock, 1);
-        shm_ptr->active_ops[TYPE_CASSA]++; shm_ptr->daily_active_ops++; shm_ptr->total_active_ops++;
+        shm_ptr->active_ops[TYPE_CASSA]++; 
+        shm_ptr->daily_active_ops++; 
+        shm_ptr->cassiere_has_worked = 1; // 🟢 Segna la sua presenza storica
         semop(semid, &mutex_unlock, 1);
 
         while(1) {

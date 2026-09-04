@@ -75,7 +75,8 @@ typedef struct {
     int current_day;
 
     int op_assignment[MAX_WORKERS];
-    int worker_has_worked[MAX_WORKERS]; // TRACCIA OPERATORI DISTINTI NELLA SIMULAZIONE
+    int worker_has_worked[MAX_WORKERS]; // TRACCIA OPERATORI DISTINTI 
+    int cassiere_has_worked;            // TRACCIA IL CASSIERE
     
     int queue_lengths[5];
     int active_ops[5]; 
@@ -108,7 +109,7 @@ typedef struct {
     int total_users_dropped;
     int total_revenue;
     int total_pauses;
-    int total_active_ops;        
+    // RIMOSSO: total_active_ops per evitare ambiguità costruttive
     int total_dishes_served[5]; 
     int total_dishes_wasted[3]; 
     int wait_time_stazioni[5];
