@@ -66,7 +66,7 @@ typedef struct {
     char name[32];
     int price;
     int porzioni_rimanenti;
-    int secondo_associato; // 🔴 CORREZIONE: Campo dedicato per la logica dei contorni
+    int secondo_associato; // Associazione esplicita per i contorni
 } menu_item_t;
 
 typedef struct {

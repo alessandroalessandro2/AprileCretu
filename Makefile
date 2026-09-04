@@ -35,4 +35,12 @@ $(BIN_DIR):
 clean:
 	rm -rf $(OBJ_DIR) $(BIN_DIR)
 
-.PHONY: all clean
+test_timeout: $(EXECS)
+	@echo "\n=== AVVIO TEST: SCENARIO TIMEOUT ==="
+	./$(BIN_DIR)/responsabile "config timeout.conf"
+
+test_overload: $(EXECS)
+	@echo "\n=== AVVIO TEST: SCENARIO OVERLOAD ==="
+	./$(BIN_DIR)/responsabile "config overload.conf"
+
+.PHONY: all clean test_timeout test_overload

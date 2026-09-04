@@ -217,8 +217,9 @@ int main(int argc, char *argv[]) {
         printf("- Utenti serviti oggi: %d\n", shm_ptr->daily_users_served);
         printf("- Utenti non serviti (rinunce) oggi: %d\n", shm_ptr->daily_users_dropped);
         printf("- Incasso di oggi: %d euro\n", shm_ptr->daily_revenue);
-        printf("- Pause effettuate oggi dallo staff: %d\n", shm_ptr->daily_pauses);
         printf("- Operatori attivi oggi: %d\n", shm_ptr->daily_active_ops);
+        printf("- Pause effettuate oggi dallo staff: %d (Media per op. attivo: %.1f)\n", 
+               shm_ptr->daily_pauses, shm_ptr->daily_active_ops > 0 ? (float)shm_ptr->daily_pauses / shm_ptr->daily_active_ops : 0.0);
         printf("- Piatti Distribuiti (Oggi): Primi=%d, Secondi=%d, Contorni=%d, Caffe=%d, Dolci=%d\n", 
                shm_ptr->daily_dishes_served[0], shm_ptr->daily_dishes_served[1], shm_ptr->daily_dishes_served[2], shm_ptr->daily_dishes_served[3], shm_ptr->daily_dishes_served[4]);
         printf("- Piatti Avanzati/Sprechi (Oggi): Primi=%d, Secondi=%d, Contorni=%d, Caffe/Dolci=0 (Illimitati)\n", 

@@ -71,7 +71,6 @@ int main(int argc, char *argv[]) {
                     }
                 } else if (type == TYPE_SECONDI) {
                     int c_idx = -1;
-                    // 🔴 Cerca il contorno usando il campo esatto secondo_associato
                     for (int i = 0; i < shm_ptr->num_contorni; i++) {
                         if (shm_ptr->contorni[i].secondo_associato == req.indice_piatto) {
                             c_idx = i; break;
