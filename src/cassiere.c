@@ -10,18 +10,20 @@ int main(int argc, char *argv[]) {
     
     int msgid = msgget(MSG_KEY, 0666);
     int shmid = shmget(SHM_KEY, sizeof(shared_data_t), 0666);
-    int semid = semget(SEM_KEY, NUM_SEMAPHORES, 0666); // Modificato in NUM_SEMAPHORES
-    
+    int semid = semget(SEM_KEY, 7, 0666);
     if (msgid < 0 || shmid < 0 || semid < 0) exit(1);
-         
+    
     shared_data_t *shm_ptr = (shared_data_t*) shmat(shmid, NULL, 0);
+    
     struct sembuf mutex_lock = {SEM_MUTEX, -1, SEM_UNDO};
     struct sembuf mutex_unlock = {SEM_MUTEX, 1, SEM_UNDO};
     
-    // --- SEGNALA DI ESSERE PRONTO ---
     struct sembuf sync_signal = {SEM_SYNC, 1, 0};
     semop(semid, &sync_signal, 1);
     
+    struct sembuf acq_station = {SEM_CASSA, -1, SEM_UNDO};
+    struct sembuf rel_station = {SEM_CASSA, 1, SEM_UNDO};
+
     msg_t req, res;
     size_t msg_size = sizeof(msg_t) - sizeof(long);
     int tempo_medio = cfg.avg_srvc_cassa;
@@ -29,26 +31,29 @@ int main(int argc, char *argv[]) {
     
     while(running && msgrcv(msgid, &req, msg_size, TYPE_CASSA, 0) != -1) {
         
-        // Messaggio fittizio per sbloccare la IPC a fine simulazione
-        if (req.sender_pid == 0) break;
-
+        semop(semid, &acq_station, 1);
+        
         int delta = (tempo_medio * 20) / 100;
         int actual_time = (tempo_medio - delta) + (rand() % (2 * delta + 1));
-        usleep(actual_time * 10000);
-                  
+        
+        // CORREZIONE 9
+        usleep(actual_time * (cfg.n_nano_secs / 1000)); 
+        
         semop(semid, &mutex_lock, 1);
-        shm_ptr->revenue += req.importo; 
-        shm_ptr->users_served++; 
+        shm_ptr->revenue += req.importo;
+        shm_ptr->users_served++;
         semop(semid, &mutex_unlock, 1);
+        
+        semop(semid, &rel_station, 1);
         
         res.mtype = req.sender_pid;
         res.status = 1;
-                           
+        
         if (msgsnd(msgid, &res, msg_size, 0) == -1) {
-            running = 0; 
+            running = 0;
         }
     }
-         
+    
     shmdt(shm_ptr);
     return 0;
 }
