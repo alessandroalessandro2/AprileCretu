@@ -57,7 +57,6 @@ int main(int argc, char *argv[]) {
     
     load_menu_and_prices("menu.txt", shm_ptr, &cfg);
 
-    // 🔴 VALIDAZIONI DI SICUREZZA RIGOROSE (Aggiornate)
     if (cfg.nof_workers < 3 || cfg.nof_workers > MAX_WORKERS) {
         printf("[Errore] NOF_WORKERS (%d) non valido. Deve essere compreso tra 3 e %d.\n", cfg.nof_workers, MAX_WORKERS);
         exit(1);
@@ -80,7 +79,6 @@ int main(int argc, char *argv[]) {
     arg.val = 0; semctl(semid, SEM_DAY_START, SETVAL, arg); 
     arg.val = 0; semctl(semid, SEM_DAY_END, SETVAL, arg); 
 
-    // 🔴 CREAZIONE DEI PROCESSI (Fix per -Wformat-overflow)
     char id_str[16];
     for(int i = 0; i < cfg.nof_workers; i++) {
         snprintf(id_str, sizeof(id_str), "%d", i);
@@ -97,7 +95,8 @@ int main(int argc, char *argv[]) {
     }
     for (int i = 0; i < cfg.nof_users; i++) {
         if(fork() == 0) { 
-            execl("./bin/utente", "utente", NULL); 
+            // 🔴 CORREZIONE: Passato config_file all'utente!
+            execl("./bin/utente", "utente", config_file, NULL); 
             perror("execl utente fallita");
             exit(1); 
         }
@@ -183,7 +182,6 @@ int main(int argc, char *argv[]) {
         int waiting = shm_ptr->queue_lengths[TYPE_PRIMI] + shm_ptr->queue_lengths[TYPE_SECONDI] + shm_ptr->queue_lengths[TYPE_COFFEE] + shm_ptr->queue_lengths[TYPE_CASSA];
         if (waiting > cfg.overload_threshold) {
             causa_terminazione = "OVERLOAD (Utenti in attesa a fine giornata superiori alla soglia)";
-            printf("\n[!!!] %s. (In coda: %d)\n", causa_terminazione, waiting);
             shm_ptr->sim_running = 0; 
         }
         semop(semid, &mutex_unlock, 1);

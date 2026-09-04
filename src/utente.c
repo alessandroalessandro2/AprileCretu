@@ -40,9 +40,12 @@ int try_food(int msgid, msg_t *req, msg_t *res, size_t msg_size, int type, int n
     return 0; 
 }
 
-int main() {
+// 🔴 CORREZIONE: Aggiunto argc, argv al main
+int main(int argc, char *argv[]) {
     srand(getpid() ^ time(NULL));
-    const char *config_file = "config.conf"; 
+    
+    // 🔴 CORREZIONE: Prende la config da terminale come i fratelli
+    const char *config_file = (argc > 1) ? argv[1] : "config.conf"; 
     config_t cfg; memset(&cfg, 0, sizeof(config_t)); load_config(config_file, &cfg);
 
     int msgid = msgget(MSG_KEY, 0666); int shmid = shmget(SHM_KEY, sizeof(shared_data_t), 0666);
@@ -110,6 +113,11 @@ int main() {
                 if (res.status == STATUS_CLOSED) sim_active = 0;
             }
             
+            semop(semid, &mutex_lock, 1);
+            shm_ptr->users_in_mensa--;
+            if (!sim_active) { shm_ptr->daily_users_dropped++; shm_ptr->total_users_dropped++; }
+            semop(semid, &mutex_unlock, 1);
+
             if (sim_active) {
                 struct sembuf table_wait_nowait = {SEM_TAVOLI, -1, IPC_NOWAIT}; 
                 struct sembuf table_signal = {SEM_TAVOLI, 1, SEM_UNDO};
@@ -130,17 +138,10 @@ int main() {
                     usleep(base_eat_us);
                     semop(semid, &table_signal, 1);
                 } else {
-                    // 🔴 CORREZIONE: Utente cacciato durante l'attesa al tavolo, aggiorna Statistiche!
                     sim_active = 0; 
                 }
             }
-
-            semop(semid, &mutex_lock, 1);
-            shm_ptr->users_in_mensa--;
-            if (!sim_active) { shm_ptr->daily_users_dropped++; shm_ptr->total_users_dropped++; }
-            semop(semid, &mutex_unlock, 1);
-
-        } // Fine if(decides_to_eat)
+        } 
 
         struct sembuf end_day = {SEM_DAY_END, 1, 0}; semop(semid, &end_day, 1);
     }
