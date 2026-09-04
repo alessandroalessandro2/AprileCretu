@@ -23,21 +23,23 @@ int main(int argc, char *argv[]) {
         semop(semid, &mutex_lock, 1);
         shm_ptr->active_ops[TYPE_CASSA]++; 
         shm_ptr->daily_active_ops++; 
-        shm_ptr->cassiere_has_worked = 1; // 🟢 Segna la sua presenza storica
+        shm_ptr->cassiere_has_worked = 1; 
         semop(semid, &mutex_unlock, 1);
 
         while(1) {
             if (msgrcv(msgid, &req, msg_size, TYPE_CASSA, IPC_NOWAIT) != -1) {
                 semop(semid, &mutex_lock, 1);
+                shm_ptr->queue_lengths[TYPE_CASSA]--; // Scala la coda subito
                 int queue_wait = shm_ptr->sim_time - req.enqueue_time;
                 if (queue_wait < 0) queue_wait = 0;
                 semop(semid, &mutex_unlock, 1);
 
                 if (shm_ptr->day_ended) { res.mtype = req.sender_pid; res.status = STATUS_CLOSED; msgsnd(msgid, &res, msg_size, 0); continue; }
                 
-                int delta = (cfg.avg_srvc_cassa * 20) / 100;
-                int actual_time = (cfg.avg_srvc_cassa - delta) + (rand() % (2 * delta + 1));
-                usleep(actual_time * (cfg.n_nano_secs / 1000)); 
+                long base_us = (long)cfg.avg_srvc_cassa * (cfg.n_nano_secs / 1000);
+                long delta_us = (base_us * 20) / 100;
+                long actual_us = (base_us - delta_us) + (rand() % (2 * delta_us + 1));
+                usleep(actual_us); 
                 
                 semop(semid, &mutex_lock, 1);
                 shm_ptr->daily_revenue += req.importo; shm_ptr->total_revenue += req.importo;

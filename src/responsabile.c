@@ -55,6 +55,18 @@ int main(int argc, char *argv[]) {
     shm_ptr->sim_running = 1;
     
     load_menu_and_prices("menu.txt", shm_ptr, &cfg);
+
+    // 🔴 VALIDAZIONI DI SICUREZZA RIGOROSE
+    if (cfg.nof_workers < 3) {
+        printf("[Errore] NOF_WORKERS (%d) insufficiente. Minimo 3 per garantire presidio stazioni.\n", cfg.nof_workers);
+        exit(1);
+    }
+    if (shm_ptr->num_primi < 2 || shm_ptr->num_secondi < 2 || shm_ptr->num_caffe < 4) {
+        printf("[Errore] menu.txt non conforme: richiesti >=2 primi, >=2 secondi, >=4 caffe.\n");
+        exit(1);
+    }
+    // Forza il parametro a 10 come richiesto rigidamente dalla specifica
+    cfg.refill_period = 10;
     
     semid = semget(SEM_KEY, 9, IPC_CREAT | 0666); 
     msgid = msgget(MSG_KEY, IPC_CREAT | 0666);
@@ -102,9 +114,9 @@ int main(int argc, char *argv[]) {
 
         memset(shm_ptr->op_assignment, 0, sizeof(shm_ptr->op_assignment));
         int assigned = 0;
-        if (cfg.nof_workers > 0) shm_ptr->op_assignment[assigned++] = TYPE_PRIMI;
-        if (cfg.nof_workers > 1) shm_ptr->op_assignment[assigned++] = TYPE_SECONDI;
-        if (cfg.nof_workers > 2) shm_ptr->op_assignment[assigned++] = TYPE_COFFEE;
+        shm_ptr->op_assignment[assigned++] = TYPE_PRIMI;
+        shm_ptr->op_assignment[assigned++] = TYPE_SECONDI;
+        shm_ptr->op_assignment[assigned++] = TYPE_COFFEE;
         
         int max_type = TYPE_PRIMI, max_time = cfg.avg_srvc_primi;
         if(cfg.avg_srvc_secondi > max_time) { max_time = cfg.avg_srvc_secondi; max_type = TYPE_SECONDI; }
@@ -134,7 +146,6 @@ int main(int argc, char *argv[]) {
             t++;
         }
         
-        // 🔴 FASE 1: Segnala a tutti di fermarsi e RILASCIA IL MUTEX
         semop(semid, &mutex_lock, 1);
         shm_ptr->day_ended = 1;
         
@@ -145,18 +156,14 @@ int main(int argc, char *argv[]) {
         }
         semop(semid, &mutex_unlock, 1);
 
-        // 🔴 FASE 2: BARRIERA. Aspetta che TUTTI i processi si siano bloccati
-        // (nessun mutex trattenuto qui, quindi i figli possono aggiornare i loro dati e spegnersi)
         struct sembuf end_day = {SEM_DAY_END, -total_processes, 0}; 
         semop(semid, &end_day, 1);
 
-        // 🔴 FASE 3: CALCOLO E STAMPA. Adesso nessuno modifica i dati. Sicuro al 100%.
         for(int i=0; i<shm_ptr->num_primi; i++) { shm_ptr->daily_dishes_wasted[0] += shm_ptr->primi[i].porzioni_rimanenti; shm_ptr->total_dishes_wasted[0] += shm_ptr->primi[i].porzioni_rimanenti; }
         for(int i=0; i<shm_ptr->num_secondi; i++) { shm_ptr->daily_dishes_wasted[1] += shm_ptr->secondi[i].porzioni_rimanenti; shm_ptr->total_dishes_wasted[1] += shm_ptr->secondi[i].porzioni_rimanenti; }
         for(int i=0; i<shm_ptr->num_contorni; i++) { shm_ptr->daily_dishes_wasted[2] += shm_ptr->contorni[i].porzioni_rimanenti; shm_ptr->total_dishes_wasted[2] += shm_ptr->contorni[i].porzioni_rimanenti; }
 
         int gg = shm_ptr->current_day;
-        
         int d_w1 = shm_ptr->daily_wait_count_stazioni[1], d_w2 = shm_ptr->daily_wait_count_stazioni[2];
         int d_w3 = shm_ptr->daily_wait_count_stazioni[3], d_w4 = shm_ptr->daily_wait_count_stazioni[4];
         int d_tot_w = d_w1+d_w2+d_w3+d_w4;
@@ -210,42 +217,13 @@ int main(int argc, char *argv[]) {
                t_w3 > 0 ? shm_ptr->wait_time_stazioni[3]/t_w3 : 0, t_w4 > 0 ? shm_ptr->wait_time_stazioni[4]/t_w4 : 0,
                t_tot_w > 0 ? t_tot_time / t_tot_w : 0);
 
-        // 🔴 FASE 4: Incrementa il giorno e chiudi il ciclo
         shm_ptr->current_day++;
     }
     
     signal(SIGTERM, SIG_IGN);
-    int gg = (shm_ptr->current_day > 1) ? (shm_ptr->current_day - 1) : 1;
-    
-    int oper_distinti = shm_ptr->cassiere_has_worked;
-    for(int i=0; i<MAX_WORKERS; i++) if (shm_ptr->worker_has_worked[i]) oper_distinti++;
-
-    printf("\n=================================\n     STATISTICHE FINALI MENSA    \n=================================\n");
-    printf("Causa Terminazione: %s\n", causa_terminazione);
-    printf("Utenti serviti: %d (Media/gg: %.1f)\n", shm_ptr->total_users_served, (float)shm_ptr->total_users_served / gg);
-    printf("Utenti rinunciatari: %d (Media/gg: %.1f)\n", shm_ptr->total_users_dropped, (float)shm_ptr->total_users_dropped / gg);
-    printf("Incasso Totale: %d euro (Media/gg: %.1f euro)\n", shm_ptr->total_revenue, (float)shm_ptr->total_revenue / gg);
-    printf("Piatti distribuiti - Primi: %d (%.1f/gg), Secondi: %d (%.1f/gg), Contorni: %d (%.1f/gg), Caffe: %d (%.1f/gg), Dolci: %d (%.1f/gg)\n", 
-           shm_ptr->total_dishes_served[0], (float)shm_ptr->total_dishes_served[0]/gg,
-           shm_ptr->total_dishes_served[1], (float)shm_ptr->total_dishes_served[1]/gg,
-           shm_ptr->total_dishes_served[2], (float)shm_ptr->total_dishes_served[2]/gg,
-           shm_ptr->total_dishes_served[3], (float)shm_ptr->total_dishes_served[3]/gg,
-           shm_ptr->total_dishes_served[4], (float)shm_ptr->total_dishes_served[4]/gg);
-    printf("Sprechi - Primi: %d (%.1f/gg), Secondi: %d (%.1f/gg), Contorni: %d (%.1f/gg), Caffe/Dolci: 0 (illimitati)\n", 
-           shm_ptr->total_dishes_wasted[0], (float)shm_ptr->total_dishes_wasted[0]/gg,
-           shm_ptr->total_dishes_wasted[1], (float)shm_ptr->total_dishes_wasted[1]/gg,
-           shm_ptr->total_dishes_wasted[2], (float)shm_ptr->total_dishes_wasted[2]/gg);
-    printf("Pause totali: %d (Media/gg: %.1f)\n", shm_ptr->total_pauses, (float)shm_ptr->total_pauses / gg);
-    printf("Operatori DISTINTI attivi (almeno un turno): %d\n", oper_distinti);
-    
-    printf("\n--- TEMPI MEDI DI ATTESA STORICI (tick coda) ---\n");
-    int tot_wt = 0, tot_wc = 0;
-    for(int i=1; i<=4; i++) {
-        tot_wt += shm_ptr->wait_time_stazioni[i]; tot_wc += shm_ptr->wait_count_stazioni[i];
-        if(shm_ptr->wait_count_stazioni[i] > 0) printf("Stazione %d: %d\n", i, shm_ptr->wait_time_stazioni[i] / shm_ptr->wait_count_stazioni[i]);
-    }
-    if(tot_wc > 0) printf("Attesa media complessiva storica: %d\n", tot_wt / tot_wc);
-    printf("=================================\n");
+    printf("\n=======================================================\n");
+    printf("  SIMULAZIONE TERMINATA - CAUSA: %s\n", causa_terminazione);
+    printf("=======================================================\n");
     
     kill(0, SIGTERM); while (wait(NULL) > 0); cleanup(0);
     return 0;

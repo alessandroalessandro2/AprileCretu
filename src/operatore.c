@@ -42,7 +42,9 @@ int main(int argc, char *argv[]) {
         int pauses_taken = 0;
         while (1) {
             if (msgrcv(msgid, &req, msg_size, type, IPC_NOWAIT) != -1) {
+                // 🔴 RIMOZIONE IMMEDIATA DALLA CODA = Calcolo Overload inattaccabile
                 semop(semid, &mutex_lock, 1);
+                shm_ptr->queue_lengths[type]--;
                 int queue_wait = shm_ptr->sim_time - req.enqueue_time;
                 if (queue_wait < 0) queue_wait = 0;
                 semop(semid, &mutex_unlock, 1);
@@ -61,8 +63,10 @@ int main(int argc, char *argv[]) {
                     int c_idx = req.indice_piatto % shm_ptr->num_contorni;
                     if (shm_ptr->secondi[req.indice_piatto].porzioni_rimanenti > 0 &&
                        (shm_ptr->num_contorni == 0 || shm_ptr->contorni[c_idx].porzioni_rimanenti > 0)) {
+                        
                         shm_ptr->secondi[req.indice_piatto].porzioni_rimanenti--;
                         shm_ptr->total_dishes_served[1]++; shm_ptr->daily_dishes_served[1]++;
+                        
                         if(shm_ptr->num_contorni > 0) {
                             shm_ptr->contorni[c_idx].porzioni_rimanenti--;
                             shm_ptr->total_dishes_served[2]++; shm_ptr->daily_dishes_served[2]++;
@@ -77,10 +81,12 @@ int main(int argc, char *argv[]) {
                 semop(semid, &mutex_unlock, 1);
                 
                 if (status == STATUS_SERVED) {
+                    // 🔴 CALCOLO GRANULARE AL MICROSECONDO (previene troncamenti se tempo = 1)
+                    long base_us = (long)tempo_medio * (cfg.n_nano_secs / 1000);
                     int pct = (type == TYPE_COFFEE) ? 80 : 50;
-                    int delta = (tempo_medio * pct) / 100;
-                    int actual_time = (tempo_medio - delta) + (rand() % (2 * delta + 1));
-                    usleep(actual_time * (cfg.n_nano_secs / 1000));
+                    long delta_us = (base_us * pct) / 100;
+                    long actual_us = (base_us - delta_us) + (rand() % (2 * delta_us + 1));
+                    usleep(actual_us);
                 }
                 
                 res.mtype = req.sender_pid; res.status = status; res.queue_wait = queue_wait; 
