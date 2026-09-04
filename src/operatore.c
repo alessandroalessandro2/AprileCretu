@@ -22,9 +22,15 @@ int main(int argc, char *argv[]) {
         
         semop(semid, &mutex_lock, 1);
         int type = shm_ptr->op_assignment[my_id];
-        if(my_id < MAX_WORKERS) shm_ptr->worker_has_worked[my_id] = 1;
+        if(my_id < MAX_WORKERS && type != 0) shm_ptr->worker_has_worked[my_id] = 1;
         semop(semid, &mutex_unlock, 1);
         
+        // 🔴 CORREZIONE: Se non c'è posto fisico, l'operatore va in "Panchina" (TYPE 0) e aspetta fine turno
+        if (type == 0) {
+            struct sembuf end_day = {SEM_DAY_END, 1, 0}; semop(semid, &end_day, 1);
+            continue; 
+        }
+
         int tempo_medio = 10; int station_sem = -1;
         if (type == TYPE_PRIMI) { tempo_medio = cfg.avg_srvc_primi; station_sem = SEM_PRIMI; }
         else if (type == TYPE_SECONDI) { tempo_medio = cfg.avg_srvc_secondi; station_sem = SEM_SECONDI; }
@@ -42,7 +48,6 @@ int main(int argc, char *argv[]) {
         int pauses_taken = 0;
         while (1) {
             if (msgrcv(msgid, &req, msg_size, type, IPC_NOWAIT) != -1) {
-                // CORREZIONE: Controllo day_ended fatto in mutua esclusione assieme alla coda
                 semop(semid, &mutex_lock, 1);
                 shm_ptr->queue_lengths[type]--;
                 int queue_wait = shm_ptr->sim_time - req.enqueue_time;
@@ -66,7 +71,6 @@ int main(int argc, char *argv[]) {
                         status = STATUS_SERVED;
                     }
                 } else if (type == TYPE_SECONDI) {
-                    // CORREZIONE: Evita divisione per zero
                     int c_idx = (shm_ptr->num_contorni > 0) ? (req.indice_piatto % shm_ptr->num_contorni) : 0;
                     if (shm_ptr->secondi[req.indice_piatto].porzioni_rimanenti > 0 &&
                        (shm_ptr->num_contorni == 0 || shm_ptr->contorni[c_idx].porzioni_rimanenti > 0)) {

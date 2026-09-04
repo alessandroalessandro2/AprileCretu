@@ -89,7 +89,6 @@ int main() {
                 req.mtype = TYPE_COFFEE; req.sender_pid = mypid; 
                 req.is_dolce = (rand() % 2 == 0) ? 1 : 0; 
                 
-                // CORREZIONE: Pescaggio da array dolci
                 if (req.is_dolce && shm_ptr->num_dolci > 0) {
                     req.indice_piatto = rand() % shm_ptr->num_dolci;
                 } else if (!req.is_dolce && shm_ptr->num_caffe > 0) {
@@ -111,11 +110,6 @@ int main() {
                 if (res.status == STATUS_CLOSED) sim_active = 0;
             }
             
-            semop(semid, &mutex_lock, 1);
-            shm_ptr->users_in_mensa--;
-            if (!sim_active) { shm_ptr->daily_users_dropped++; shm_ptr->total_users_dropped++; }
-            semop(semid, &mutex_unlock, 1);
-
             if (sim_active) {
                 struct sembuf table_wait_nowait = {SEM_TAVOLI, -1, IPC_NOWAIT}; 
                 struct sembuf table_signal = {SEM_TAVOLI, 1, SEM_UNDO};
@@ -127,7 +121,7 @@ int main() {
                         break;
                     }
                     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                        usleep(50000);
+                        usleep(50000); 
                     } else break;
                 }
 
@@ -135,9 +129,18 @@ int main() {
                     long base_eat_us = (5 * piatti_acquistati) * (cfg.n_nano_secs / 1000);
                     usleep(base_eat_us);
                     semop(semid, &table_signal, 1);
+                } else {
+                    // 🔴 CORREZIONE: Utente cacciato durante l'attesa al tavolo, aggiorna Statistiche!
+                    sim_active = 0; 
                 }
             }
-        } 
+
+            semop(semid, &mutex_lock, 1);
+            shm_ptr->users_in_mensa--;
+            if (!sim_active) { shm_ptr->daily_users_dropped++; shm_ptr->total_users_dropped++; }
+            semop(semid, &mutex_unlock, 1);
+
+        } // Fine if(decides_to_eat)
 
         struct sembuf end_day = {SEM_DAY_END, 1, 0}; semop(semid, &end_day, 1);
     }

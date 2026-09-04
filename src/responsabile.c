@@ -23,7 +23,7 @@ void load_menu_and_prices(const char *filename, shared_data_t *shm, config_t *cf
                 shm->num_secondi++;
             } else if (strcmp(type, "CONTORNO") == 0 && shm->num_contorni < MAX_PIATTI) {
                 strncpy(shm->contorni[shm->num_contorni].name, name, 31);
-                shm->contorni[shm->num_contorni].price = 0; 
+                shm->contorni[shm->num_contorni].price = 0;
                 shm->num_contorni++;
             } else if (strcmp(type, "CAFFE") == 0 && shm->num_caffe < 4) {
                 strncpy(shm->caffe[shm->num_caffe].name, name, 31);
@@ -111,16 +111,36 @@ int main(int argc, char *argv[]) {
         memset(shm_ptr->daily_wait_time_stazioni, 0, sizeof(shm_ptr->daily_wait_time_stazioni));
         memset(shm_ptr->daily_wait_count_stazioni, 0, sizeof(shm_ptr->daily_wait_count_stazioni));
 
+        // 🔴 CORREZIONE: Assegnazione intelligente vincolata ai posti fisici (Previene il deadlock)
         memset(shm_ptr->op_assignment, 0, sizeof(shm_ptr->op_assignment));
         int assigned = 0;
-        shm_ptr->op_assignment[assigned++] = TYPE_PRIMI;
-        shm_ptr->op_assignment[assigned++] = TYPE_SECONDI;
-        shm_ptr->op_assignment[assigned++] = TYPE_COFFEE;
+        int max_seats[4] = {0, cfg.nof_wk_seats_primi, cfg.nof_wk_seats_secondi, cfg.nof_wk_seats_coffee};
+        int curr_seats[4] = {0, 0, 0, 0};
+
+        if (assigned < cfg.nof_workers && max_seats[TYPE_PRIMI] > 0) { shm_ptr->op_assignment[assigned++] = TYPE_PRIMI; curr_seats[TYPE_PRIMI]++; }
+        if (assigned < cfg.nof_workers && max_seats[TYPE_SECONDI] > 0) { shm_ptr->op_assignment[assigned++] = TYPE_SECONDI; curr_seats[TYPE_SECONDI]++; }
+        if (assigned < cfg.nof_workers && max_seats[TYPE_COFFEE] > 0) { shm_ptr->op_assignment[assigned++] = TYPE_COFFEE; curr_seats[TYPE_COFFEE]++; }
         
-        int max_type = TYPE_PRIMI, max_time = cfg.avg_srvc_primi;
-        if(cfg.avg_srvc_secondi > max_time) { max_time = cfg.avg_srvc_secondi; max_type = TYPE_SECONDI; }
-        if(cfg.avg_srvc_coffee > max_time)  { max_time = cfg.avg_srvc_coffee; max_type = TYPE_COFFEE; }
-        while(assigned < cfg.nof_workers) shm_ptr->op_assignment[assigned++] = max_type;
+        while(assigned < cfg.nof_workers) {
+            int max_type = -1, max_time = -1;
+            if (curr_seats[TYPE_PRIMI] < max_seats[TYPE_PRIMI] && cfg.avg_srvc_primi > max_time) {
+                max_time = cfg.avg_srvc_primi; max_type = TYPE_PRIMI;
+            }
+            if (curr_seats[TYPE_SECONDI] < max_seats[TYPE_SECONDI] && cfg.avg_srvc_secondi > max_time) {
+                max_time = cfg.avg_srvc_secondi; max_type = TYPE_SECONDI;
+            }
+            if (curr_seats[TYPE_COFFEE] < max_seats[TYPE_COFFEE] && cfg.avg_srvc_coffee > max_time) {
+                max_time = cfg.avg_srvc_coffee; max_type = TYPE_COFFEE;
+            }
+            
+            if (max_type != -1) {
+                shm_ptr->op_assignment[assigned++] = max_type;
+                curr_seats[max_type]++;
+            } else {
+                // Non ci sono più posti fisici nella mensa: questo operatore va in panchina (Type 0)
+                shm_ptr->op_assignment[assigned++] = 0; 
+            }
+        }
 
         for(int i=0; i<shm_ptr->num_primi; i++) shm_ptr->primi[i].porzioni_rimanenti = cfg.avg_refill_primi;
         for(int i=0; i<shm_ptr->num_secondi; i++) shm_ptr->secondi[i].porzioni_rimanenti = cfg.avg_refill_secondi;
@@ -225,7 +245,6 @@ int main(int argc, char *argv[]) {
     int oper_distinti = shm_ptr->cassiere_has_worked;
     for(int i=0; i<MAX_WORKERS; i++) if (shm_ptr->worker_has_worked[i]) oper_distinti++;
 
-    // CORREZIONE: RIPRISTINO STATISTICHE FINALI 
     printf("\n=================================\n     STATISTICHE FINALI MENSA    \n=================================\n");
     printf("Causa Terminazione: %s\n", causa_terminazione);
     printf("Utenti serviti: %d (Media/gg: %.1f)\n", shm_ptr->total_users_served, (float)shm_ptr->total_users_served / gg);
