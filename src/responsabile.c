@@ -57,8 +57,9 @@ int main(int argc, char *argv[]) {
     
     load_menu_and_prices("menu.txt", shm_ptr, &cfg);
 
-    if (cfg.nof_workers < 3) {
-        printf("[Errore] NOF_WORKERS (%d) insufficiente. Minimo 3 per garantire presidio stazioni.\n", cfg.nof_workers);
+    // 🔴 VALIDAZIONI DI SICUREZZA RIGOROSE (Aggiornate)
+    if (cfg.nof_workers < 3 || cfg.nof_workers > MAX_WORKERS) {
+        printf("[Errore] NOF_WORKERS (%d) non valido. Deve essere compreso tra 3 e %d.\n", cfg.nof_workers, MAX_WORKERS);
         exit(1);
     }
     if (shm_ptr->num_primi < 2 || shm_ptr->num_secondi < 2 || shm_ptr->num_caffe < 4) {
@@ -79,14 +80,27 @@ int main(int argc, char *argv[]) {
     arg.val = 0; semctl(semid, SEM_DAY_START, SETVAL, arg); 
     arg.val = 0; semctl(semid, SEM_DAY_END, SETVAL, arg); 
 
-    char id_str[8];
+    // 🔴 CREAZIONE DEI PROCESSI (Fix per -Wformat-overflow)
+    char id_str[16];
     for(int i = 0; i < cfg.nof_workers; i++) {
-        sprintf(id_str, "%d", i);
-        if(fork() == 0) { execl("./bin/operatore", "operatore", id_str, config_file, NULL); exit(1); }
+        snprintf(id_str, sizeof(id_str), "%d", i);
+        if(fork() == 0) { 
+            execl("./bin/operatore", "operatore", id_str, config_file, NULL); 
+            perror("execl operatore fallita");
+            exit(1); 
+        }
     }
-    if(fork() == 0) { execl("./bin/cassiere", "cassiere", config_file, NULL); exit(1); }
+    if(fork() == 0) { 
+        execl("./bin/cassiere", "cassiere", config_file, NULL); 
+        perror("execl cassiere fallita");
+        exit(1); 
+    }
     for (int i = 0; i < cfg.nof_users; i++) {
-        if(fork() == 0) { execl("./bin/utente", "utente", NULL); exit(1); }
+        if(fork() == 0) { 
+            execl("./bin/utente", "utente", NULL); 
+            perror("execl utente fallita");
+            exit(1); 
+        }
     }
     
     int total_processes = cfg.nof_workers + 1 + cfg.nof_users;
@@ -111,7 +125,6 @@ int main(int argc, char *argv[]) {
         memset(shm_ptr->daily_wait_time_stazioni, 0, sizeof(shm_ptr->daily_wait_time_stazioni));
         memset(shm_ptr->daily_wait_count_stazioni, 0, sizeof(shm_ptr->daily_wait_count_stazioni));
 
-        // 🔴 CORREZIONE: Assegnazione intelligente vincolata ai posti fisici (Previene il deadlock)
         memset(shm_ptr->op_assignment, 0, sizeof(shm_ptr->op_assignment));
         int assigned = 0;
         int max_seats[4] = {0, cfg.nof_wk_seats_primi, cfg.nof_wk_seats_secondi, cfg.nof_wk_seats_coffee};
@@ -137,7 +150,6 @@ int main(int argc, char *argv[]) {
                 shm_ptr->op_assignment[assigned++] = max_type;
                 curr_seats[max_type]++;
             } else {
-                // Non ci sono più posti fisici nella mensa: questo operatore va in panchina (Type 0)
                 shm_ptr->op_assignment[assigned++] = 0; 
             }
         }
@@ -171,6 +183,7 @@ int main(int argc, char *argv[]) {
         int waiting = shm_ptr->queue_lengths[TYPE_PRIMI] + shm_ptr->queue_lengths[TYPE_SECONDI] + shm_ptr->queue_lengths[TYPE_COFFEE] + shm_ptr->queue_lengths[TYPE_CASSA];
         if (waiting > cfg.overload_threshold) {
             causa_terminazione = "OVERLOAD (Utenti in attesa a fine giornata superiori alla soglia)";
+            printf("\n[!!!] %s. (In coda: %d)\n", causa_terminazione, waiting);
             shm_ptr->sim_running = 0; 
         }
         semop(semid, &mutex_unlock, 1);
