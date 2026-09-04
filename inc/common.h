@@ -10,7 +10,6 @@
 #include <sys/sem.h>
 #include <sys/msg.h>
 #include <sys/wait.h>
-#include <sys/time.h>
 #include <time.h>
 #include <signal.h>
 #include <string.h>
@@ -22,15 +21,16 @@
 #define SEM_KEY 0x3C4D
 #define MSG_KEY 0x5E6F
 
-// INDICI SEMAFORI (Totale: 8)
+// INDICI SEMAFORI (Totale: 9)
 #define SEM_MUTEX       0
 #define SEM_TAVOLI      1
 #define SEM_PRIMI       2
 #define SEM_SECONDI     3
 #define SEM_COFFEE      4
 #define SEM_CASSA       5
-#define SEM_DAY_START   6  // Barriera inizio giornata
-#define SEM_DAY_END     7  // Barriera fine giornata
+#define SEM_READY       6  // Fase 1: Tutti i figli sono pronti
+#define SEM_DAY_START   7  // Fase 2: Il responsabile dà il via
+#define SEM_DAY_END     8  // Chiusura giornata
 
 #define TYPE_PRIMI    1
 #define TYPE_SECONDI  2
@@ -39,6 +39,11 @@
 
 #define MAX_WORKERS 20
 #define MAX_PIATTI 10
+
+// STATI MESSAGGIO
+#define STATUS_CLOSED    0
+#define STATUS_EXHAUSTED 1
+#define STATUS_SERVED    2
 
 union semun {
     int val;
@@ -52,6 +57,7 @@ typedef struct {
     int status;
     int importo;
     int indice_piatto;
+    int is_dolce; // 1 se è una richiesta per il dolce alla stazione coffee
 } msg_t;
 
 typedef struct {
@@ -66,12 +72,10 @@ typedef struct {
     int day_ended;
     int current_day;
 
-    // Assegnazione giornaliera degli operatori: indice = id_operatore, valore = TYPE_STAZIONE
     int op_assignment[MAX_WORKERS];
     
-    // Contatori per code e operatori attivi
     int queue_lengths[5];
-    int active_ops[5];
+    int active_ops[5]; // Rappresenta ora i posti FISICI occupati
 
     // Menu
     menu_item_t primi[MAX_PIATTI];
@@ -85,26 +89,26 @@ typedef struct {
     int num_contorni;
     int num_caffe;
 
-    // Statistiche Giornaliere
+    // Statistiche Giornaliere (resettate ogni giorno)
     int daily_users_served;
     int daily_users_dropped;
     int daily_revenue;
     int daily_pauses;
+    int daily_active_ops;
 
     // Statistiche Totali
     int total_users_served;
     int total_users_dropped;
     int total_revenue;
     int total_pauses;
-    int total_dishes_served[4]; // 0=Primi, 1=Secondi, 2=Contorni, 3=Caffe
-    int total_dishes_wasted[4];
+    int total_dishes_served[5]; // 0=Primi, 1=Secondi, 2=Contorni, 3=Caffe, 4=Dolci
+    int total_dishes_wasted[3]; // 0=Primi, 1=Secondi, 2=Contorni
 
-    // Tempi di attesa (misurati in tick di sim_time)
+    // Tempi di attesa (anche con attesa = 0)
     int wait_time_stazioni[5];
     int wait_count_stazioni[5];
 
-    // Contatore per l'overload
-    int users_waiting;
+    int users_in_mensa; // Per l'overload
     
 } shared_data_t;
 
