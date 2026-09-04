@@ -16,9 +16,7 @@ int main(int argc, char *argv[]) {
     msg_t req, res; size_t msg_size = sizeof(msg_t) - sizeof(long);
     
     while (1) {
-        // Barriera Fase 1
         struct sembuf signal_ready = {SEM_READY, 1, 0}; semop(semid, &signal_ready, 1);
-        // Barriera Fase 2
         struct sembuf wait_start = {SEM_DAY_START, -1, 0}; semop(semid, &wait_start, 1);
         if (!shm_ptr->sim_running) break;
         
@@ -34,16 +32,22 @@ int main(int argc, char *argv[]) {
         struct sembuf acq_station = {station_sem, -1, SEM_UNDO};
         struct sembuf rel_station = {station_sem, 1, SEM_UNDO};
 
-        // ACQUISISCE POSTAZIONE FISICA PER TUTTA LA GIORNATA
         if (station_sem != -1) semop(semid, &acq_station, 1);
         semop(semid, &mutex_lock, 1);
         shm_ptr->active_ops[type]++;
-        shm_ptr->daily_active_ops++; // Statistica giornaliera globale
+        shm_ptr->daily_active_ops++; 
+        shm_ptr->total_active_ops++; 
         semop(semid, &mutex_unlock, 1);
 
         int pauses_taken = 0;
         while (1) {
             if (msgrcv(msgid, &req, msg_size, type, IPC_NOWAIT) != -1) {
+                // Calcola l'attesa VERA della coda
+                semop(semid, &mutex_lock, 1);
+                int queue_wait = shm_ptr->sim_time - req.enqueue_time;
+                if (queue_wait < 0) queue_wait = 0;
+                semop(semid, &mutex_unlock, 1);
+
                 if (shm_ptr->day_ended) { res.mtype = req.sender_pid; res.status = STATUS_CLOSED; msgsnd(msgid, &res, msg_size, 0); continue; }
                 
                 semop(semid, &mutex_lock, 1);
@@ -51,23 +55,27 @@ int main(int argc, char *argv[]) {
                 if (type == TYPE_PRIMI) {
                     if (shm_ptr->primi[req.indice_piatto].porzioni_rimanenti > 0) {
                         shm_ptr->primi[req.indice_piatto].porzioni_rimanenti--;
-                        shm_ptr->total_dishes_served[0]++; status = STATUS_SERVED;
+                        shm_ptr->total_dishes_served[0]++; shm_ptr->daily_dishes_served[0]++; 
+                        status = STATUS_SERVED;
                     }
                 } else if (type == TYPE_SECONDI) {
-                    if (shm_ptr->secondi[req.indice_piatto].porzioni_rimanenti > 0) {
+                    int c_idx = req.indice_piatto % shm_ptr->num_contorni;
+                    // Atomicità: servo il secondo SOLO se c'è anche il contorno
+                    if (shm_ptr->secondi[req.indice_piatto].porzioni_rimanenti > 0 &&
+                       (shm_ptr->num_contorni == 0 || shm_ptr->contorni[c_idx].porzioni_rimanenti > 0)) {
+                        
                         shm_ptr->secondi[req.indice_piatto].porzioni_rimanenti--;
-                        shm_ptr->total_dishes_served[1]++;
-                        // Lega il contorno al secondo
-                        int c_idx = req.indice_piatto % shm_ptr->num_contorni;
-                        if(shm_ptr->num_contorni > 0 && shm_ptr->contorni[c_idx].porzioni_rimanenti > 0) {
+                        shm_ptr->total_dishes_served[1]++; shm_ptr->daily_dishes_served[1]++;
+                        
+                        if(shm_ptr->num_contorni > 0) {
                             shm_ptr->contorni[c_idx].porzioni_rimanenti--;
-                            shm_ptr->total_dishes_served[2]++;
+                            shm_ptr->total_dishes_served[2]++; shm_ptr->daily_dishes_served[2]++;
                         }
                         status = STATUS_SERVED;
                     }
                 } else if (type == TYPE_COFFEE) {
-                    if (req.is_dolce) { shm_ptr->total_dishes_served[4]++; } // Dolce infinito
-                    else { shm_ptr->total_dishes_served[3]++; }
+                    if (req.is_dolce) { shm_ptr->total_dishes_served[4]++; shm_ptr->daily_dishes_served[4]++; }
+                    else { shm_ptr->total_dishes_served[3]++; shm_ptr->daily_dishes_served[3]++; }
                     status = STATUS_SERVED;
                 }
                 semop(semid, &mutex_unlock, 1);
@@ -79,12 +87,14 @@ int main(int argc, char *argv[]) {
                     usleep(actual_time * (cfg.n_nano_secs / 1000));
                 }
                 
-                res.mtype = req.sender_pid; res.status = status;
+                res.mtype = req.sender_pid; 
+                res.status = status;
+                res.queue_wait = queue_wait; 
                 msgsnd(msgid, &res, msg_size, 0);
                 
                 if (status == STATUS_SERVED && pauses_taken < cfg.nof_pause && (rand() % 100 < 10)) {
                     semop(semid, &mutex_lock, 1);
-                    if (shm_ptr->active_ops[type] > 1) { // Protezione su dato reale
+                    if (shm_ptr->active_ops[type] > 1) { 
                         shm_ptr->active_ops[type]--; shm_ptr->daily_pauses++; shm_ptr->total_pauses++;
                         semop(semid, &mutex_unlock, 1);
                         usleep(300000); pauses_taken++;
@@ -96,7 +106,7 @@ int main(int argc, char *argv[]) {
             }
         }
         semop(semid, &mutex_lock, 1); shm_ptr->active_ops[type]--; semop(semid, &mutex_unlock, 1);
-        if (station_sem != -1) semop(semid, &rel_station, 1); // Rilascia postazione fine turno
+        if (station_sem != -1) semop(semid, &rel_station, 1);
         struct sembuf end_day = {SEM_DAY_END, 1, 0}; semop(semid, &end_day, 1);
     }
     shmdt(shm_ptr); return 0;

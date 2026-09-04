@@ -19,11 +19,20 @@ int main(int argc, char *argv[]) {
         struct sembuf wait_start = {SEM_DAY_START, -1, 0}; semop(semid, &wait_start, 1);
         if (!shm_ptr->sim_running) break;
 
+        semop(semid, &acq_station, 1);
+        semop(semid, &mutex_lock, 1);
+        shm_ptr->active_ops[TYPE_CASSA]++; shm_ptr->daily_active_ops++; shm_ptr->total_active_ops++;
+        semop(semid, &mutex_unlock, 1);
+
         while(1) {
             if (msgrcv(msgid, &req, msg_size, TYPE_CASSA, IPC_NOWAIT) != -1) {
+                semop(semid, &mutex_lock, 1);
+                int queue_wait = shm_ptr->sim_time - req.enqueue_time;
+                if (queue_wait < 0) queue_wait = 0;
+                semop(semid, &mutex_unlock, 1);
+
                 if (shm_ptr->day_ended) { res.mtype = req.sender_pid; res.status = STATUS_CLOSED; msgsnd(msgid, &res, msg_size, 0); continue; }
                 
-                semop(semid, &acq_station, 1);
                 int delta = (cfg.avg_srvc_cassa * 20) / 100;
                 int actual_time = (cfg.avg_srvc_cassa - delta) + (rand() % (2 * delta + 1));
                 usleep(actual_time * (cfg.n_nano_secs / 1000)); 
@@ -32,13 +41,15 @@ int main(int argc, char *argv[]) {
                 shm_ptr->daily_revenue += req.importo; shm_ptr->total_revenue += req.importo;
                 shm_ptr->daily_users_served++; shm_ptr->total_users_served++;
                 semop(semid, &mutex_unlock, 1);
-                semop(semid, &rel_station, 1);
                 
-                res.mtype = req.sender_pid; res.status = STATUS_SERVED; msgsnd(msgid, &res, msg_size, 0);
+                res.mtype = req.sender_pid; res.status = STATUS_SERVED; res.queue_wait = queue_wait; 
+                msgsnd(msgid, &res, msg_size, 0);
             } else {
                 if (errno == ENOMSG) { if (shm_ptr->day_ended) break; usleep(10000); } else break;
             }
         }
+        semop(semid, &mutex_lock, 1); shm_ptr->active_ops[TYPE_CASSA]--; semop(semid, &mutex_unlock, 1);
+        semop(semid, &rel_station, 1);
         struct sembuf end_day = {SEM_DAY_END, 1, 0}; semop(semid, &end_day, 1);
     }
     shmdt(shm_ptr); return 0;

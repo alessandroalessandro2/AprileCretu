@@ -21,16 +21,16 @@
 #define SEM_KEY 0x3C4D
 #define MSG_KEY 0x5E6F
 
-// INDICI SEMAFORI (Totale: 9)
+// INDICI SEMAFORI
 #define SEM_MUTEX       0
 #define SEM_TAVOLI      1
 #define SEM_PRIMI       2
 #define SEM_SECONDI     3
 #define SEM_COFFEE      4
 #define SEM_CASSA       5
-#define SEM_READY       6  // Fase 1: Tutti i figli sono pronti
-#define SEM_DAY_START   7  // Fase 2: Il responsabile dà il via
-#define SEM_DAY_END     8  // Chiusura giornata
+#define SEM_READY       6
+#define SEM_DAY_START   7
+#define SEM_DAY_END     8
 
 #define TYPE_PRIMI    1
 #define TYPE_SECONDI  2
@@ -57,7 +57,11 @@ typedef struct {
     int status;
     int importo;
     int indice_piatto;
-    int is_dolce; // 1 se è una richiesta per il dolce alla stazione coffee
+    int is_dolce;
+    
+    // Novità per il calcolo preciso del tempo in coda
+    int enqueue_time;
+    int queue_wait;
 } msg_t;
 
 typedef struct {
@@ -73,9 +77,8 @@ typedef struct {
     int current_day;
 
     int op_assignment[MAX_WORKERS];
-    
     int queue_lengths[5];
-    int active_ops[5]; // Rappresenta ora i posti FISICI occupati
+    int active_ops[5]; 
 
     // Menu
     menu_item_t primi[MAX_PIATTI];
@@ -89,27 +92,28 @@ typedef struct {
     int num_contorni;
     int num_caffe;
 
-    // Statistiche Giornaliere (resettate ogni giorno)
+    // --- Statistiche Giornaliere ---
     int daily_users_served;
     int daily_users_dropped;
     int daily_revenue;
     int daily_pauses;
     int daily_active_ops;
+    int daily_dishes_served[5];
+    int daily_dishes_wasted[3];
+    int daily_wait_time_stazioni[5];
+    int daily_wait_count_stazioni[5];
 
-    // Statistiche Totali
+    // --- Statistiche Totali ---
     int total_users_served;
     int total_users_dropped;
     int total_revenue;
     int total_pauses;
+    int total_active_ops;
     int total_dishes_served[5]; // 0=Primi, 1=Secondi, 2=Contorni, 3=Caffe, 4=Dolci
     int total_dishes_wasted[3]; // 0=Primi, 1=Secondi, 2=Contorni
-
-    // Tempi di attesa (anche con attesa = 0)
     int wait_time_stazioni[5];
     int wait_count_stazioni[5];
 
-    int users_in_mensa; // Per l'overload
-    
 } shared_data_t;
 
 #endif // COMMON_H

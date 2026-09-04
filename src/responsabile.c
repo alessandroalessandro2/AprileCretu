@@ -15,7 +15,7 @@ void load_menu_and_prices(const char *filename, shared_data_t *shm, config_t *cf
         if (sscanf(line, "%15[^,],%31[^,],%d", type, name, &dummy_price) == 3) {
             if (strcmp(type, "PRIMO") == 0 && shm->num_primi < MAX_PIATTI) {
                 strncpy(shm->primi[shm->num_primi].name, name, 31);
-                shm->primi[shm->num_primi].price = cfg->price_primi; // Forza prezzo config
+                shm->primi[shm->num_primi].price = cfg->price_primi;
                 shm->num_primi++;
             } else if (strcmp(type, "SECONDO") == 0 && shm->num_secondi < MAX_PIATTI) {
                 strncpy(shm->secondi[shm->num_secondi].name, name, 31);
@@ -23,7 +23,7 @@ void load_menu_and_prices(const char *filename, shared_data_t *shm, config_t *cf
                 shm->num_secondi++;
             } else if (strcmp(type, "CONTORNO") == 0 && shm->num_contorni < MAX_PIATTI) {
                 strncpy(shm->contorni[shm->num_contorni].name, name, 31);
-                shm->contorni[shm->num_contorni].price = 0; // Incluso nel secondo
+                shm->contorni[shm->num_contorni].price = 0;
                 shm->num_contorni++;
             } else if (strcmp(type, "CAFFE") == 0 && shm->num_caffe < 4) {
                 strncpy(shm->caffe[shm->num_caffe].name, name, 31);
@@ -31,7 +31,7 @@ void load_menu_and_prices(const char *filename, shared_data_t *shm, config_t *cf
                 shm->num_caffe++;
             } else if (strcmp(type, "DOLCE") == 0) {
                 strncpy(shm->dolce.name, name, 31);
-                shm->dolce.price = cfg->price_coffee; // Dolce costa come il caffè da consegna
+                shm->dolce.price = cfg->price_coffee;
             }
         }
     }
@@ -47,7 +47,6 @@ int main(int argc, char *argv[]) {
     const char *config_file = (argc > 1) ? argv[1] : "config.conf";
     config_t cfg; memset(&cfg, 0, sizeof(config_t));
     load_config(config_file, &cfg);
-    
     signal(SIGINT, cleanup); signal(SIGTERM, cleanup);
     
     shmid = shmget(SHM_KEY, sizeof(shared_data_t), IPC_CREAT | 0666);
@@ -59,9 +58,7 @@ int main(int argc, char *argv[]) {
     
     semid = semget(SEM_KEY, 9, IPC_CREAT | 0666); 
     msgid = msgget(MSG_KEY, IPC_CREAT | 0666);
-    
-    union semun arg;
-    arg.val = 1; semctl(semid, SEM_MUTEX, SETVAL, arg);
+    union semun arg; arg.val = 1; semctl(semid, SEM_MUTEX, SETVAL, arg);
     arg.val = cfg.nof_table_seats;     semctl(semid, SEM_TAVOLI, SETVAL, arg); 
     arg.val = cfg.nof_wk_seats_primi;  semctl(semid, SEM_PRIMI, SETVAL, arg);
     arg.val = cfg.nof_wk_seats_secondi;semctl(semid, SEM_SECONDI, SETVAL, arg);
@@ -82,7 +79,6 @@ int main(int argc, char *argv[]) {
     }
     
     int total_processes = cfg.nof_workers + 1 + cfg.nof_users;
-    
     int DAY_LENGTH = 50; 
     shm_ptr->current_day = 1;
     const char* causa_terminazione = "TIMEOUT (Raggiunto limite di giorni impostato)";
@@ -95,35 +91,28 @@ int main(int argc, char *argv[]) {
         printf("=========================================\n");
         
         semop(semid, &mutex_lock, 1);
-        shm_ptr->day_ended = 0;
-        shm_ptr->sim_time = 0;
-        shm_ptr->daily_users_served = 0;
-        shm_ptr->daily_users_dropped = 0;
-        shm_ptr->daily_revenue = 0;
-        shm_ptr->daily_pauses = 0;
-        shm_ptr->daily_active_ops = 0;
+        shm_ptr->day_ended = 0; shm_ptr->sim_time = 0;
+        shm_ptr->daily_users_served = 0; shm_ptr->daily_users_dropped = 0;
+        shm_ptr->daily_revenue = 0; shm_ptr->daily_pauses = 0; shm_ptr->daily_active_ops = 0;
+        memset(shm_ptr->daily_dishes_served, 0, sizeof(shm_ptr->daily_dishes_served));
+        memset(shm_ptr->daily_dishes_wasted, 0, sizeof(shm_ptr->daily_dishes_wasted));
+        memset(shm_ptr->daily_wait_time_stazioni, 0, sizeof(shm_ptr->daily_wait_time_stazioni));
+        memset(shm_ptr->daily_wait_count_stazioni, 0, sizeof(shm_ptr->daily_wait_count_stazioni));
 
-        // Assegnazione operatori garantita
         memset(shm_ptr->op_assignment, 0, sizeof(shm_ptr->op_assignment));
-        shm_ptr->op_assignment[0] = TYPE_PRIMI;
-        shm_ptr->op_assignment[1] = TYPE_SECONDI;
-        shm_ptr->op_assignment[2] = TYPE_COFFEE;
+        shm_ptr->op_assignment[0] = TYPE_PRIMI; shm_ptr->op_assignment[1] = TYPE_SECONDI; shm_ptr->op_assignment[2] = TYPE_COFFEE;
         int max_type = TYPE_PRIMI, max_time = cfg.avg_srvc_primi;
         if(cfg.avg_srvc_secondi > max_time) { max_time = cfg.avg_srvc_secondi; max_type = TYPE_SECONDI; }
         if(cfg.avg_srvc_coffee > max_time)  { max_time = cfg.avg_srvc_coffee; max_type = TYPE_COFFEE; }
         for(int i = 3; i < cfg.nof_workers; i++) shm_ptr->op_assignment[i] = max_type;
 
-        // Refill Iniziale inclusi Contorni
         for(int i=0; i<shm_ptr->num_primi; i++) shm_ptr->primi[i].porzioni_rimanenti = cfg.avg_refill_primi;
         for(int i=0; i<shm_ptr->num_secondi; i++) shm_ptr->secondi[i].porzioni_rimanenti = cfg.avg_refill_secondi;
         for(int i=0; i<shm_ptr->num_contorni; i++) shm_ptr->contorni[i].porzioni_rimanenti = cfg.avg_refill_secondi;
         semop(semid, &mutex_unlock, 1);
 
-        // --- BARRIERA A DUE FASI (Anti-Deadlock) ---
-        struct sembuf wait_ready = {SEM_READY, -total_processes, 0};
-        semop(semid, &wait_ready, 1); // Aspetta che tutti siano pronti
-        struct sembuf start_day = {SEM_DAY_START, total_processes, 0};
-        semop(semid, &start_day, 1); // Da il via a tutti
+        struct sembuf wait_ready = {SEM_READY, -total_processes, 0}; semop(semid, &wait_ready, 1); 
+        struct sembuf start_day = {SEM_DAY_START, total_processes, 0}; semop(semid, &start_day, 1); 
         
         int t = 0;
         while (t < DAY_LENGTH && shm_ptr->sim_running) {
@@ -136,8 +125,11 @@ int main(int argc, char *argv[]) {
                 for(int i=0; i<shm_ptr->num_secondi; i++) { shm_ptr->secondi[i].porzioni_rimanenti += cfg.avg_refill_secondi; if(shm_ptr->secondi[i].porzioni_rimanenti > cfg.max_porzioni_secondi) shm_ptr->secondi[i].porzioni_rimanenti = cfg.max_porzioni_secondi; }
                 for(int i=0; i<shm_ptr->num_contorni; i++) { shm_ptr->contorni[i].porzioni_rimanenti += cfg.avg_refill_secondi; if(shm_ptr->contorni[i].porzioni_rimanenti > cfg.max_porzioni_secondi) shm_ptr->contorni[i].porzioni_rimanenti = cfg.max_porzioni_secondi; }
             }
-            if (shm_ptr->users_in_mensa > cfg.overload_threshold) {
-                causa_terminazione = "OVERLOAD (Superata la soglia di utenti in mensa)";
+            
+            // Overload misurato sulle Code Effettive
+            int waiting = shm_ptr->queue_lengths[TYPE_PRIMI] + shm_ptr->queue_lengths[TYPE_SECONDI] + shm_ptr->queue_lengths[TYPE_COFFEE] + shm_ptr->queue_lengths[TYPE_CASSA];
+            if (waiting > cfg.overload_threshold) {
+                causa_terminazione = "OVERLOAD (Superata la soglia di utenti in attesa)";
                 printf("\n[!!!] %s.\n", causa_terminazione);
                 shm_ptr->sim_running = 0; 
             }
@@ -147,41 +139,59 @@ int main(int argc, char *argv[]) {
         
         semop(semid, &mutex_lock, 1);
         shm_ptr->day_ended = 1;
-        // Calcolo Sprechi
-        for(int i=0; i<shm_ptr->num_primi; i++) shm_ptr->total_dishes_wasted[0] += shm_ptr->primi[i].porzioni_rimanenti;
-        for(int i=0; i<shm_ptr->num_secondi; i++) shm_ptr->total_dishes_wasted[1] += shm_ptr->secondi[i].porzioni_rimanenti;
-        for(int i=0; i<shm_ptr->num_contorni; i++) shm_ptr->total_dishes_wasted[2] += shm_ptr->contorni[i].porzioni_rimanenti;
+        // Sprechi del giorno
+        for(int i=0; i<shm_ptr->num_primi; i++) { shm_ptr->daily_dishes_wasted[0] += shm_ptr->primi[i].porzioni_rimanenti; shm_ptr->total_dishes_wasted[0] += shm_ptr->primi[i].porzioni_rimanenti; }
+        for(int i=0; i<shm_ptr->num_secondi; i++) { shm_ptr->daily_dishes_wasted[1] += shm_ptr->secondi[i].porzioni_rimanenti; shm_ptr->total_dishes_wasted[1] += shm_ptr->secondi[i].porzioni_rimanenti; }
+        for(int i=0; i<shm_ptr->num_contorni; i++) { shm_ptr->daily_dishes_wasted[2] += shm_ptr->contorni[i].porzioni_rimanenti; shm_ptr->total_dishes_wasted[2] += shm_ptr->contorni[i].porzioni_rimanenti; }
 
         printf("\n--- FINE GIORNO %d ---\n", shm_ptr->current_day);
         printf("[Statistiche Giornaliere] Serviti: %d, Rinunce: %d, Incasso: %d euro, Pause: %d, Op. Attivi: %d\n", 
                shm_ptr->daily_users_served, shm_ptr->daily_users_dropped, shm_ptr->daily_revenue, shm_ptr->daily_pauses, shm_ptr->daily_active_ops);
+        printf("  Piatti Distribuiti -> Primi: %d, Secondi: %d, Contorni: %d, Caffe: %d, Dolci: %d\n", 
+               shm_ptr->daily_dishes_served[0], shm_ptr->daily_dishes_served[1], shm_ptr->daily_dishes_served[2], shm_ptr->daily_dishes_served[3], shm_ptr->daily_dishes_served[4]);
+        printf("  Sprechi Giornalieri-> Primi: %d, Secondi: %d, Contorni: %d\n", 
+               shm_ptr->daily_dishes_wasted[0], shm_ptr->daily_dishes_wasted[1], shm_ptr->daily_dishes_wasted[2]);
+        
+        int d_w1 = shm_ptr->daily_wait_count_stazioni[1]; int d_w2 = shm_ptr->daily_wait_count_stazioni[2];
+        int d_w3 = shm_ptr->daily_wait_count_stazioni[3]; int d_w4 = shm_ptr->daily_wait_count_stazioni[4];
+        printf("  Attesa Media (tick)-> Primi: %d, Secondi: %d, Caffe: %d, Cassa: %d\n",
+            d_w1 > 0 ? shm_ptr->daily_wait_time_stazioni[1]/d_w1 : 0, d_w2 > 0 ? shm_ptr->daily_wait_time_stazioni[2]/d_w2 : 0,
+            d_w3 > 0 ? shm_ptr->daily_wait_time_stazioni[3]/d_w3 : 0, d_w4 > 0 ? shm_ptr->daily_wait_time_stazioni[4]/d_w4 : 0);
+        
         shm_ptr->current_day++;
         semop(semid, &mutex_unlock, 1);
 
-        struct sembuf end_day = {SEM_DAY_END, -total_processes, 0};
-        semop(semid, &end_day, 1); // Aspetta che tutti chiudano il ciclo
+        struct sembuf end_day = {SEM_DAY_END, -total_processes, 0}; semop(semid, &end_day, 1);
     }
     
     signal(SIGTERM, SIG_IGN);
     int gg = (shm_ptr->current_day > 1) ? (shm_ptr->current_day - 1) : 1;
+    
     printf("\n=================================\n     STATISTICHE FINALI MENSA    \n=================================\n");
     printf("Causa Terminazione: %s\n", causa_terminazione);
-    printf("Utenti serviti: %d (Media/gg: %d)\n", shm_ptr->total_users_served, shm_ptr->total_users_served / gg);
-    printf("Utenti rinunciatari: %d (Media/gg: %d)\n", shm_ptr->total_users_dropped, shm_ptr->total_users_dropped / gg);
-    printf("Incasso: %d euro (Media/gg: %d euro)\n", shm_ptr->total_revenue, shm_ptr->total_revenue / gg);
-    printf("Piatti serviti - Primi: %d, Secondi: %d, Contorni: %d, Caffe: %d, Dolci: %d\n", 
-           shm_ptr->total_dishes_served[0], shm_ptr->total_dishes_served[1], shm_ptr->total_dishes_served[2], shm_ptr->total_dishes_served[3], shm_ptr->total_dishes_served[4]);
-    printf("Piatti sprecati - Primi: %d, Secondi: %d, Contorni: %d\n", 
-           shm_ptr->total_dishes_wasted[0], shm_ptr->total_dishes_wasted[1], shm_ptr->total_dishes_wasted[2]);
-    printf("Pause totali: %d (Media/gg: %d)\n", shm_ptr->total_pauses, shm_ptr->total_pauses / gg);
+    printf("Utenti serviti: %d (Media/gg: %.1f)\n", shm_ptr->total_users_served, (float)shm_ptr->total_users_served / gg);
+    printf("Utenti rinunciatari: %d (Media/gg: %.1f)\n", shm_ptr->total_users_dropped, (float)shm_ptr->total_users_dropped / gg);
+    printf("Incasso Totale: %d euro (Media/gg: %.1f euro)\n", shm_ptr->total_revenue, (float)shm_ptr->total_revenue / gg);
+    printf("Piatti distribuiti - Primi: %d (%.1f/gg), Secondi: %d (%.1f/gg), Contorni: %d (%.1f/gg), Caffe: %d (%.1f/gg), Dolci: %d (%.1f/gg)\n", 
+           shm_ptr->total_dishes_served[0], (float)shm_ptr->total_dishes_served[0]/gg,
+           shm_ptr->total_dishes_served[1], (float)shm_ptr->total_dishes_served[1]/gg,
+           shm_ptr->total_dishes_served[2], (float)shm_ptr->total_dishes_served[2]/gg,
+           shm_ptr->total_dishes_served[3], (float)shm_ptr->total_dishes_served[3]/gg,
+           shm_ptr->total_dishes_served[4], (float)shm_ptr->total_dishes_served[4]/gg);
+    printf("Sprechi - Primi: %d (%.1f/gg), Secondi: %d (%.1f/gg), Contorni: %d (%.1f/gg)\n", 
+           shm_ptr->total_dishes_wasted[0], (float)shm_ptr->total_dishes_wasted[0]/gg,
+           shm_ptr->total_dishes_wasted[1], (float)shm_ptr->total_dishes_wasted[1]/gg,
+           shm_ptr->total_dishes_wasted[2], (float)shm_ptr->total_dishes_wasted[2]/gg);
+    printf("Pause totali: %d (Media/gg: %.1f)\n", shm_ptr->total_pauses, (float)shm_ptr->total_pauses / gg);
+    printf("Operatori attivi globali (Postazioni occupate per turni): %d\n", shm_ptr->total_active_ops);
     
-    printf("\n--- TEMPI MEDI DI ATTESA (tick) ---\n");
+    printf("\n--- TEMPI MEDI DI ATTESA STORICI (tick coda) ---\n");
     int tot_wt = 0, tot_wc = 0;
     for(int i=1; i<=4; i++) {
         tot_wt += shm_ptr->wait_time_stazioni[i]; tot_wc += shm_ptr->wait_count_stazioni[i];
         if(shm_ptr->wait_count_stazioni[i] > 0) printf("Stazione %d: %d\n", i, shm_ptr->wait_time_stazioni[i] / shm_ptr->wait_count_stazioni[i]);
     }
-    if(tot_wc > 0) printf("Attesa media complessiva: %d\n", tot_wt / tot_wc);
+    if(tot_wc > 0) printf("Attesa media complessiva storica: %d\n", tot_wt / tot_wc);
     printf("=================================\n");
     
     kill(0, SIGTERM); while (wait(NULL) > 0); cleanup(0);

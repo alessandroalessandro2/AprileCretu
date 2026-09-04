@@ -5,7 +5,7 @@ void wait_and_track(int msgid, msg_t *req, msg_t *res, size_t msg_size, int type
     struct sembuf mutex_unlock = {SEM_MUTEX, 1, SEM_UNDO};
     
     semop(semid, &mutex_lock, 1);
-    int start_time = shm_ptr->sim_time;
+    req->enqueue_time = shm_ptr->sim_time;
     shm_ptr->queue_lengths[type]++;
     semop(semid, &mutex_unlock, 1);
     
@@ -13,11 +13,13 @@ void wait_and_track(int msgid, msg_t *req, msg_t *res, size_t msg_size, int type
     msgrcv(msgid, res, msg_size, mypid, 0);
     
     semop(semid, &mutex_lock, 1);
-    int wait_time = shm_ptr->sim_time - start_time;
-    // La statistica aumenta sempre, anche se wait_time = 0
-    shm_ptr->wait_time_stazioni[type] += wait_time;
-    shm_ptr->wait_count_stazioni[type]++;
     shm_ptr->queue_lengths[type]--;
+    if (res->status != STATUS_CLOSED) {
+        shm_ptr->wait_time_stazioni[type] += res->queue_wait;
+        shm_ptr->wait_count_stazioni[type]++;
+        shm_ptr->daily_wait_time_stazioni[type] += res->queue_wait;
+        shm_ptr->daily_wait_count_stazioni[type]++;
+    }
     semop(semid, &mutex_unlock, 1);
 }
 
@@ -32,14 +34,13 @@ int try_food(int msgid, msg_t *req, msg_t *res, size_t msg_size, int type, int n
         
         if (res->status == STATUS_SERVED) {
             if (type == TYPE_PRIMI) *costo += shm_ptr->primi[req->indice_piatto].price;
-            else if (type == TYPE_SECONDI) *costo += shm_ptr->secondi[req->indice_piatto].price; // Il contorno è gratis nel prezzo
+            else if (type == TYPE_SECONDI) *costo += shm_ptr->secondi[req->indice_piatto].price;
             return 1;
         } else if (res->status == STATUS_CLOSED) {
-            return 0; // Mensa chiusa
+            return 0; // Mensa chiusa in corsa
         }
-        // Se EXHAUSTED, il ciclo riprova con un altro piatto
     }
-    return 0; // Tutti esauriti
+    return 0; 
 }
 
 int main() {
@@ -49,35 +50,36 @@ int main() {
     shared_data_t *shm_ptr = (shared_data_t*) shmat(shmid, NULL, 0); pid_t mypid = getpid();
     
     msg_t req, res; size_t msg_size = sizeof(msg_t) - sizeof(long);
-    struct sembuf mutex_lock = {SEM_MUTEX, -1, SEM_UNDO};
-    struct sembuf mutex_unlock = {SEM_MUTEX, 1, SEM_UNDO};
     
     while(1) {
         struct sembuf signal_ready = {SEM_READY, 1, 0}; semop(semid, &signal_ready, 1);
         struct sembuf wait_start = {SEM_DAY_START, -1, 0}; semop(semid, &wait_start, 1);
         if (!shm_ptr->sim_running) break;
 
-        semop(semid, &mutex_lock, 1); shm_ptr->users_in_mensa++; semop(semid, &mutex_unlock, 1);
-        
         int sim_active = 1, totale_da_pagare = 0, piatti_acquistati = 0;
         
+        int choice = 3; 
+        if (shm_ptr->queue_lengths[TYPE_PRIMI] > shm_ptr->queue_lengths[TYPE_SECONDI] + 2) choice = 2; 
+        else if (shm_ptr->queue_lengths[TYPE_SECONDI] > shm_ptr->queue_lengths[TYPE_PRIMI] + 2) choice = 1; 
+        
         // --- 1. PRIMI ---
-        if (sim_active && !shm_ptr->day_ended) {
-            if(try_food(msgid, &req, &res, msg_size, TYPE_PRIMI, shm_ptr->num_primi, mypid, shm_ptr, semid, &totale_da_pagare)) piatti_acquistati++;
-            else sim_active = 0; 
-        } else sim_active = 0;
+        if (sim_active && !shm_ptr->day_ended && (choice == 1 || choice == 3)) {
+            if(try_food(msgid, &req, &res, msg_size, TYPE_PRIMI, shm_ptr->num_primi, mypid, shm_ptr, semid, &totale_da_pagare)) 
+                piatti_acquistati++;
+        }
 
         // --- 2. SECONDI ---
-        if (sim_active && !shm_ptr->day_ended) {
-            if(try_food(msgid, &req, &res, msg_size, TYPE_SECONDI, shm_ptr->num_secondi, mypid, shm_ptr, semid, &totale_da_pagare)) piatti_acquistati++;
-            else sim_active = 0; 
-        } else sim_active = 0;
+        if (sim_active && !shm_ptr->day_ended && (choice == 2 || choice == 3)) {
+            if(try_food(msgid, &req, &res, msg_size, TYPE_SECONDI, shm_ptr->num_secondi, mypid, shm_ptr, semid, &totale_da_pagare)) 
+                piatti_acquistati++;
+        }
+        
+        // Abbandona SOLO SE voleva mangiare cibo ma tutto è andato esaurito o è scattata la chiusura
+        if (sim_active && totale_da_pagare == 0) sim_active = 0; 
         
         // --- 3. DOLCE & CAFFE' ---
         if (sim_active && !shm_ptr->day_ended && (rand() % 2 == 0)) {
             req.mtype = TYPE_COFFEE; req.sender_pid = mypid; 
-            
-            // Sceglie a caso se caffè (0) o dolce (1)
             req.is_dolce = (rand() % 2 == 0) ? 1 : 0; 
             req.indice_piatto = (req.is_dolce) ? 0 : rand() % shm_ptr->num_caffe; 
             
@@ -95,11 +97,14 @@ int main() {
             if (res.status == STATUS_CLOSED) sim_active = 0;
         }
         
-        // Segna uscita
-        semop(semid, &mutex_lock, 1);
-        shm_ptr->users_in_mensa--;
-        if (!sim_active) { shm_ptr->daily_users_dropped++; shm_ptr->total_users_dropped++; }
-        semop(semid, &mutex_unlock, 1);
+        // Segna uscita / Rinunciatario
+        struct sembuf mutex_lock = {SEM_MUTEX, -1, SEM_UNDO};
+        struct sembuf mutex_unlock = {SEM_MUTEX, 1, SEM_UNDO};
+        if (!sim_active) { 
+            semop(semid, &mutex_lock, 1);
+            shm_ptr->daily_users_dropped++; shm_ptr->total_users_dropped++; 
+            semop(semid, &mutex_unlock, 1);
+        }
 
         // --- TAVOLO ---
         if (sim_active) {
@@ -111,5 +116,6 @@ int main() {
         }
         struct sembuf end_day = {SEM_DAY_END, 1, 0}; semop(semid, &end_day, 1);
     }
+    
     shmdt(shm_ptr); return 0;
 }
