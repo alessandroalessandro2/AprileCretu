@@ -3,7 +3,10 @@ PRIMO,Spaghetti allo Scoglio,6
 PRIMO,Penne all'Arrabbiata,4
 SECONDO,Frittura di Pesce,8
 SECONDO,Insalata Mista,4
-DOLCE,Tiramisù,3
+CONTORNO,Patatine Fritte,3
+CONTORNO,Verdure Grigliate,3
+DOLCE,Tiramisu,4
+DOLCE,Panna Cotta,4
 CAFFE,Espresso Normale,1
 CAFFE,Espresso Macchiato,1
 CAFFE,Decaffeinato,1
