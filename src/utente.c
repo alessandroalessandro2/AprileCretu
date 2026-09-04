@@ -13,7 +13,6 @@ void wait_and_track(int msgid, msg_t *req, msg_t *res, size_t msg_size, int type
     msgrcv(msgid, res, msg_size, mypid, 0);
     
     semop(semid, &mutex_lock, 1);
-    // 🔴 NOTA: La coda non la decrementiamo più qui, lo fa l'operatore prima di servire
     if (res->status != STATUS_CLOSED) {
         shm_ptr->wait_time_stazioni[type] += res->queue_wait;
         shm_ptr->wait_count_stazioni[type]++;
@@ -43,7 +42,7 @@ int try_food(int msgid, msg_t *req, msg_t *res, size_t msg_size, int type, int n
 
 int main() {
     srand(getpid() ^ time(NULL));
-    const char *config_file = "config.conf"; // Utile per leggere la granularità del tempo per il tavolo
+    const char *config_file = "config.conf"; 
     config_t cfg; memset(&cfg, 0, sizeof(config_t)); load_config(config_file, &cfg);
 
     int msgid = msgget(MSG_KEY, 0666); int shmid = shmget(SHM_KEY, sizeof(shared_data_t), 0666);
@@ -89,11 +88,19 @@ int main() {
             if (sim_active && !shm_ptr->day_ended && (rand() % 2 == 0)) {
                 req.mtype = TYPE_COFFEE; req.sender_pid = mypid; 
                 req.is_dolce = (rand() % 2 == 0) ? 1 : 0; 
-                req.indice_piatto = (req.is_dolce) ? 0 : rand() % shm_ptr->num_caffe; 
+                
+                // CORREZIONE: Pescaggio da array dolci
+                if (req.is_dolce && shm_ptr->num_dolci > 0) {
+                    req.indice_piatto = rand() % shm_ptr->num_dolci;
+                } else if (!req.is_dolce && shm_ptr->num_caffe > 0) {
+                    req.indice_piatto = rand() % shm_ptr->num_caffe;
+                } else {
+                    req.indice_piatto = 0;
+                }
                 
                 wait_and_track(msgid, &req, &res, msg_size, TYPE_COFFEE, mypid, shm_ptr, semid);
                 if (res.status == STATUS_SERVED) {
-                    totale_da_pagare += (req.is_dolce) ? shm_ptr->dolce.price : shm_ptr->caffe[req.indice_piatto].price;
+                    totale_da_pagare += (req.is_dolce) ? shm_ptr->dolci[req.indice_piatto].price : shm_ptr->caffe[req.indice_piatto].price;
                     piatti_acquistati++;
                 } else if (res.status == STATUS_CLOSED) sim_active = 0;
             }
@@ -109,7 +116,6 @@ int main() {
             if (!sim_active) { shm_ptr->daily_users_dropped++; shm_ptr->total_users_dropped++; }
             semop(semid, &mutex_unlock, 1);
 
-            // 🔴 CORREZIONE TAVOLI (Non si incastrano se chiude il giorno)
             if (sim_active) {
                 struct sembuf table_wait_nowait = {SEM_TAVOLI, -1, IPC_NOWAIT}; 
                 struct sembuf table_signal = {SEM_TAVOLI, 1, SEM_UNDO};
@@ -121,12 +127,11 @@ int main() {
                         break;
                     }
                     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                        usleep(50000); // Riprova poco dopo se pieno
+                        usleep(50000);
                     } else break;
                 }
 
                 if (table_acquired) {
-                    // Diciamo che consumare un piatto richiede 5 minuti simulati
                     long base_eat_us = (5 * piatti_acquistati) * (cfg.n_nano_secs / 1000);
                     usleep(base_eat_us);
                     semop(semid, &table_signal, 1);

@@ -28,13 +28,20 @@ int main(int argc, char *argv[]) {
 
         while(1) {
             if (msgrcv(msgid, &req, msg_size, TYPE_CASSA, IPC_NOWAIT) != -1) {
+                // CORREZIONE: Controllo day_ended fatto in mutua esclusione
                 semop(semid, &mutex_lock, 1);
-                shm_ptr->queue_lengths[TYPE_CASSA]--; // Scala la coda subito
+                shm_ptr->queue_lengths[TYPE_CASSA]--; 
                 int queue_wait = shm_ptr->sim_time - req.enqueue_time;
                 if (queue_wait < 0) queue_wait = 0;
+                int is_closed = shm_ptr->day_ended;
                 semop(semid, &mutex_unlock, 1);
 
-                if (shm_ptr->day_ended) { res.mtype = req.sender_pid; res.status = STATUS_CLOSED; msgsnd(msgid, &res, msg_size, 0); continue; }
+                if (is_closed) { 
+                    res.mtype = req.sender_pid; 
+                    res.status = STATUS_CLOSED; 
+                    msgsnd(msgid, &res, msg_size, 0); 
+                    continue; 
+                }
                 
                 long base_us = (long)cfg.avg_srvc_cassa * (cfg.n_nano_secs / 1000);
                 long delta_us = (base_us * 20) / 100;

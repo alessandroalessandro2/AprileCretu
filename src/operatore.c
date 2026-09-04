@@ -42,14 +42,20 @@ int main(int argc, char *argv[]) {
         int pauses_taken = 0;
         while (1) {
             if (msgrcv(msgid, &req, msg_size, type, IPC_NOWAIT) != -1) {
-                // 🔴 RIMOZIONE IMMEDIATA DALLA CODA = Calcolo Overload inattaccabile
+                // CORREZIONE: Controllo day_ended fatto in mutua esclusione assieme alla coda
                 semop(semid, &mutex_lock, 1);
                 shm_ptr->queue_lengths[type]--;
                 int queue_wait = shm_ptr->sim_time - req.enqueue_time;
                 if (queue_wait < 0) queue_wait = 0;
+                int is_closed = shm_ptr->day_ended;
                 semop(semid, &mutex_unlock, 1);
 
-                if (shm_ptr->day_ended) { res.mtype = req.sender_pid; res.status = STATUS_CLOSED; msgsnd(msgid, &res, msg_size, 0); continue; }
+                if (is_closed) { 
+                    res.mtype = req.sender_pid; 
+                    res.status = STATUS_CLOSED; 
+                    msgsnd(msgid, &res, msg_size, 0); 
+                    continue; 
+                }
                 
                 semop(semid, &mutex_lock, 1);
                 int status = STATUS_EXHAUSTED;
@@ -60,7 +66,8 @@ int main(int argc, char *argv[]) {
                         status = STATUS_SERVED;
                     }
                 } else if (type == TYPE_SECONDI) {
-                    int c_idx = req.indice_piatto % shm_ptr->num_contorni;
+                    // CORREZIONE: Evita divisione per zero
+                    int c_idx = (shm_ptr->num_contorni > 0) ? (req.indice_piatto % shm_ptr->num_contorni) : 0;
                     if (shm_ptr->secondi[req.indice_piatto].porzioni_rimanenti > 0 &&
                        (shm_ptr->num_contorni == 0 || shm_ptr->contorni[c_idx].porzioni_rimanenti > 0)) {
                         
@@ -81,7 +88,6 @@ int main(int argc, char *argv[]) {
                 semop(semid, &mutex_unlock, 1);
                 
                 if (status == STATUS_SERVED) {
-                    // 🔴 CALCOLO GRANULARE AL MICROSECONDO (previene troncamenti se tempo = 1)
                     long base_us = (long)tempo_medio * (cfg.n_nano_secs / 1000);
                     int pct = (type == TYPE_COFFEE) ? 80 : 50;
                     long delta_us = (base_us * pct) / 100;

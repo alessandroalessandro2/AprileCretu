@@ -7,7 +7,7 @@ void load_menu_and_prices(const char *filename, shared_data_t *shm, config_t *cf
     FILE *file = fopen(filename, "r");
     if (!file) { perror("Impossibile aprire menu.txt"); exit(1); }
     char line[256];
-    shm->num_primi = 0; shm->num_secondi = 0; shm->num_contorni = 0; shm->num_caffe = 0;
+    shm->num_primi = 0; shm->num_secondi = 0; shm->num_contorni = 0; shm->num_caffe = 0; shm->num_dolci = 0;
     
     while (fgets(line, sizeof(line), file)) {
         if (line[0] == '\n' || line[0] == '#') continue;
@@ -29,9 +29,10 @@ void load_menu_and_prices(const char *filename, shared_data_t *shm, config_t *cf
                 strncpy(shm->caffe[shm->num_caffe].name, name, 31);
                 shm->caffe[shm->num_caffe].price = cfg->price_coffee;
                 shm->num_caffe++;
-            } else if (strcmp(type, "DOLCE") == 0) {
-                strncpy(shm->dolce.name, name, 31);
-                shm->dolce.price = cfg->price_coffee; 
+            } else if (strcmp(type, "DOLCE") == 0 && shm->num_dolci < MAX_PIATTI) {
+                strncpy(shm->dolci[shm->num_dolci].name, name, 31);
+                shm->dolci[shm->num_dolci].price = cfg->price_coffee; 
+                shm->num_dolci++;
             }
         }
     }
@@ -56,7 +57,6 @@ int main(int argc, char *argv[]) {
     
     load_menu_and_prices("menu.txt", shm_ptr, &cfg);
 
-    // 🔴 VALIDAZIONI DI SICUREZZA RIGOROSE
     if (cfg.nof_workers < 3) {
         printf("[Errore] NOF_WORKERS (%d) insufficiente. Minimo 3 per garantire presidio stazioni.\n", cfg.nof_workers);
         exit(1);
@@ -65,7 +65,6 @@ int main(int argc, char *argv[]) {
         printf("[Errore] menu.txt non conforme: richiesti >=2 primi, >=2 secondi, >=4 caffe.\n");
         exit(1);
     }
-    // Forza il parametro a 10 come richiesto rigidamente dalla specifica
     cfg.refill_period = 10;
     
     semid = semget(SEM_KEY, 9, IPC_CREAT | 0666); 
@@ -221,9 +220,38 @@ int main(int argc, char *argv[]) {
     }
     
     signal(SIGTERM, SIG_IGN);
-    printf("\n=======================================================\n");
-    printf("  SIMULAZIONE TERMINATA - CAUSA: %s\n", causa_terminazione);
-    printf("=======================================================\n");
+    int gg = (shm_ptr->current_day > 1) ? (shm_ptr->current_day - 1) : 1;
+    
+    int oper_distinti = shm_ptr->cassiere_has_worked;
+    for(int i=0; i<MAX_WORKERS; i++) if (shm_ptr->worker_has_worked[i]) oper_distinti++;
+
+    // CORREZIONE: RIPRISTINO STATISTICHE FINALI 
+    printf("\n=================================\n     STATISTICHE FINALI MENSA    \n=================================\n");
+    printf("Causa Terminazione: %s\n", causa_terminazione);
+    printf("Utenti serviti: %d (Media/gg: %.1f)\n", shm_ptr->total_users_served, (float)shm_ptr->total_users_served / gg);
+    printf("Utenti rinunciatari: %d (Media/gg: %.1f)\n", shm_ptr->total_users_dropped, (float)shm_ptr->total_users_dropped / gg);
+    printf("Incasso Totale: %d euro (Media/gg: %.1f euro)\n", shm_ptr->total_revenue, (float)shm_ptr->total_revenue / gg);
+    printf("Piatti distribuiti - Primi: %d (%.1f/gg), Secondi: %d (%.1f/gg), Contorni: %d (%.1f/gg), Caffe: %d (%.1f/gg), Dolci: %d (%.1f/gg)\n", 
+           shm_ptr->total_dishes_served[0], (float)shm_ptr->total_dishes_served[0]/gg,
+           shm_ptr->total_dishes_served[1], (float)shm_ptr->total_dishes_served[1]/gg,
+           shm_ptr->total_dishes_served[2], (float)shm_ptr->total_dishes_served[2]/gg,
+           shm_ptr->total_dishes_served[3], (float)shm_ptr->total_dishes_served[3]/gg,
+           shm_ptr->total_dishes_served[4], (float)shm_ptr->total_dishes_served[4]/gg);
+    printf("Sprechi - Primi: %d (%.1f/gg), Secondi: %d (%.1f/gg), Contorni: %d (%.1f/gg), Caffe/Dolci: 0 (illimitati)\n", 
+           shm_ptr->total_dishes_wasted[0], (float)shm_ptr->total_dishes_wasted[0]/gg,
+           shm_ptr->total_dishes_wasted[1], (float)shm_ptr->total_dishes_wasted[1]/gg,
+           shm_ptr->total_dishes_wasted[2], (float)shm_ptr->total_dishes_wasted[2]/gg);
+    printf("Pause totali: %d (Media/gg: %.1f)\n", shm_ptr->total_pauses, (float)shm_ptr->total_pauses / gg);
+    printf("Operatori DISTINTI attivi (almeno un turno): %d\n", oper_distinti);
+    
+    printf("\n--- TEMPI MEDI DI ATTESA STORICI (tick coda) ---\n");
+    int tot_wt = 0, tot_wc = 0;
+    for(int i=1; i<=4; i++) {
+        tot_wt += shm_ptr->wait_time_stazioni[i]; tot_wc += shm_ptr->wait_count_stazioni[i];
+        if(shm_ptr->wait_count_stazioni[i] > 0) printf("Stazione %d: %d\n", i, shm_ptr->wait_time_stazioni[i] / shm_ptr->wait_count_stazioni[i]);
+    }
+    if(tot_wc > 0) printf("Attesa media complessiva storica: %d\n", tot_wt / tot_wc);
+    printf("=================================\n");
     
     kill(0, SIGTERM); while (wait(NULL) > 0); cleanup(0);
     return 0;
