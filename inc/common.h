@@ -66,7 +66,7 @@ typedef struct {
     char name[32];
     int price;
     int porzioni_rimanenti;
-    int secondo_associato; // Associazione esplicita per i contorni
+    int secondo_associato;
 } menu_item_t;
 
 typedef struct {
@@ -95,7 +95,7 @@ typedef struct {
     int num_caffe;
     int num_dolci;
 
-    // --- Statistiche Giornaliere ---
+    // Statistiche Giornaliere
     int daily_users_served;
     int daily_users_dropped;
     int daily_revenue;
@@ -106,7 +106,7 @@ typedef struct {
     int daily_wait_time_stazioni[5];
     int daily_wait_count_stazioni[5];
 
-    // --- Statistiche Totali ---
+    //Statistiche Totali
     int total_users_served;
     int total_users_dropped;
     int total_revenue;
